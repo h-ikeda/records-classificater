@@ -8,6 +8,6 @@
   },
   "scripts": {
     "start": "firebase emulators:exec --only=auth,firestore 'parcel src/index.html'",
-    "build": "parcel build"
+    "build": "parcel build src/index.html"
   }
 }
