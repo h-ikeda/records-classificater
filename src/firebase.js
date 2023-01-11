@@ -1,4 +1,4 @@
-export default process.env.NODE_ENV !== 'production' ? {
+export default process.env.PROJECT_ID !== 'records-classificater' ? {
   apiKey: "AIzaSyCdEu_wJyhSKJZgIDSZOZPP3NIor-wZrSQ",
   authDomain: "records-classificater-test.web.app",
   projectId: "records-classificater-test",
