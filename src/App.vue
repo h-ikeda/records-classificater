@@ -1,7 +1,7 @@
 <template>
   <TripClassificater :currentUser="currentUser" />
   <Suspense>
-    <Auth :currentUser="currentUser" />
+    <Auth :currentUser="currentUser" class="w-fit mx-auto block text-red-600 font-medium text-sm" />
   </Suspense>
 </template>
 
