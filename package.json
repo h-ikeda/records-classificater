@@ -1,15 +1,17 @@
 {
   "devDependencies": {
     "@parcel/transformer-vue": "^2.8.3",
-    "firebase": "^9.15.0",
+    "firebase": "^9.16.0",
     "parcel": "^2.8.3",
     "process": "^0.11.10",
+    "tailwindcss": "^3.2.4",
     "vue": "^3.2.45"
   },
   "scripts": {
-    "start": "firebase emulators:exec --only=auth,firestore 'parcel src/index.html'",
-    "build": "parcel build src/index.html",
+    "start": "firebase emulators:exec --only=auth,firestore parcel",
+    "build": "parcel build",
     "deploy:rules": "firebase deploy --only firestore:rules",
     "deploy:rules:prod": "firebase --project records-classificater deploy --only firestore:rules"
-  }
+  },
+  "source": "src/index.html"
 }
