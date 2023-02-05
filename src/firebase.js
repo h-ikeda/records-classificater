@@ -1,6 +1,6 @@
 export default process.env.PROJECT_ID !== 'records-classificater' ? {
   apiKey: "AIzaSyCdEu_wJyhSKJZgIDSZOZPP3NIor-wZrSQ",
-  authDomain: location.hostname,
+  authDomain: "records-classificater-test.web.app",
   projectId: "records-classificater-test",
   storageBucket: "records-classificater-test.appspot.com",
   messagingSenderId: "621218742775",
