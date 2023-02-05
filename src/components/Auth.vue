@@ -1,16 +1,16 @@
 <template>
   <SignOut v-if="currentUser" />
-  <SignInWithPassword v-else-if="dev" />
+  <SignInWithTestEmailPassword v-else-if="dev" />
   <SignInWithGoogle v-else />
 </template>
 
 <script setup>
 import { toRefs } from 'vue';
 import SignInWithGoogle from './SignInWithGoogle.vue';
-import SignInWithPassword from './SignInWithPassword.vue';
+import SignInWithTestEmailPassword from './SignInWithTestEmailPassword.vue';
 import SignOut from './SignOut.vue';
 
-const dev = process.env.NODE_ENV !== 'production';
+const dev = process.env.PROJECT_ID !== 'records-classificater';
 
 const props = defineProps({
   currentUser: { default: null },
