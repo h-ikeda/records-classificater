@@ -5,7 +5,7 @@
     <dl class="grid grid-flow-row w-fit gap-x-2 mx-auto auto-cols-fr">
       <template v-for="(value, key) in classSummaries" :key="key">
         <dt class="row-start-1 text-xs bg-gray-300 px-2 text-center font-medium">{{ key }}</dt>
-        <dd class="row-start-2 text-end border-b px-1">{{ value }} km</dd>
+        <dd class="row-start-2 text-end border-b px-1">{{ formatNumber(value) }} km</dd>
         <dd class="text-sm text-end px-1" v-if="sum">{{ Math.round(value / sum * 1000) / 10 }} %</dd>
       </template>
     </dl>
@@ -16,10 +16,10 @@
         <dt class="after:content-[':'] text-sm">記録日時</dt>
         <dd class="col-start-2 border-b border-dotted border-black my-1">{{ formatDate(timestamp) }}</dd>
         <dt class="after:content-[':'] text-sm">総走行距離 (ODO)</dt>
-        <dd class="text-lg text-end border-b border-dotted border-black">{{ odo }} km</dd>
+        <dd class="text-lg text-end border-b border-dotted border-black">{{ formatNumber(odo) }} km</dd>
         <template v-if="trip !== undefined">
           <dt class="after:content-[':'] text-sm">走行距離 (TRIP)</dt>
-          <dd class="text-lg text-end border-b border-dotted border-black">{{ trip }} km</dd>
+          <dd class="text-lg text-end border-b border-dotted border-black">{{ formatNumber(trip) }} km</dd>
         </template>
         <dt class="after:content-[':'] text-sm">分類</dt>
         <dd class="text-sm my-1">{{ cls }}</dd>
@@ -94,5 +94,9 @@ function createTrip(trip) {
     data: [...trips.value, trip].sort(sortByTimestamp),
   });
   newTripEnabled.value = false;
+}
+
+function formatNumber(number) {
+  return number.toFixed(6).replace(/\.?0*$/, '');
 }
 </script>
