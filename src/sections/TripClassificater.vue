@@ -97,6 +97,6 @@ function createTrip(trip) {
 }
 
 function formatNumber(number) {
-  return number.toFixed(6).replace(/\.0*$/, '');
+  return number.toFixed(6).replace(/\.?0*$/, '');
 }
 </script>
