@@ -1,4 +1,4 @@
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where } from "@firebase/firestore";
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, deleteField } from "@firebase/firestore";
 import { RulesTestEnvironment, assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 
 function offsetHours(date: Date, hours: number): Date {
@@ -36,11 +36,115 @@ describe('Firestore security rules', () => {
         odo: 2.3,
         class: 'Business',
       }));
+      await setDoc(doc(firestore, 'users', uid), {
+        state: {
+          vehicle: vid,
+        },
+      });
     });
   });
 
   afterAll(async () => {
     await env.cleanup();
+  });
+
+  describe('in users collection', () => {
+    test('an user can create own document', async () => {
+      const user = crypto.randomUUID().replace('-', '');
+      await assertSucceeds(setDoc(doc(env.authenticatedContext(user).firestore(), 'users', user), {
+        state: { vehicle: vid },
+      }));
+    });
+    test('an user cannot create a document with incorrect fields', async () => {
+      const user = crypto.randomUUID().replace('-', '');
+      const firestore = env.authenticatedContext(user).firestore();
+      await Promise.all([
+        assertFails(setDoc(doc(firestore, 'users', user), {
+          state: { vehicle: 0 },
+        })),
+        assertFails(setDoc(doc(firestore, 'users', user), {
+          state: { incorrectKey: vid },
+        })),
+        assertFails(setDoc(doc(firestore, 'users', user), {
+          state: {},
+        })),
+        assertFails(setDoc(doc(firestore, 'users', user), {
+          incorrectKey: { vehicle: vid },
+        })),
+        assertFails(setDoc(doc(firestore, 'users', user), {
+          incorrectKey: 'some',
+        })),
+        assertFails(setDoc(doc(firestore, 'users', user), {})),
+      ]);
+    });
+    test('an user cannot create other user\'s document', async () => {
+      await assertFails(addDoc(collection(env.authenticatedContext(uid).firestore(), 'users'), {
+        state: { vehicle: vid },
+      }));
+    });
+    test('an unauthenticated user cannot create a document', async () => {
+      await assertFails(addDoc(collection(env.unauthenticatedContext().firestore(), 'users'), {
+        state: { vehicle: vid },
+      }));
+    });
+    test('an user can update state.vehicle field', async () => {
+      const { id: vehicle } = await addDoc(collection(env.authenticatedContext(uid).firestore(), 'vehicles'), {
+        classes: ['S'],
+        permissions: {
+          read: [uid],
+          write: [uid],
+        },
+      });
+      await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+        state: { vehicle },
+      }));
+      await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+        'state.vehicle': vid,
+      }));
+    });
+    test('an user cannot update with incorrect values', async () => {
+      await Promise.all([
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          state: { vehicle: 0 },
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          state: { unapproved: vid },
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          'state.vehicle': 0,
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          'state.unapproved': vid,
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          unapproved: { vehicle: vid },
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'users', uid), {
+          'state.vehicle': deleteField(),
+        })),
+      ]);
+    });
+    test('an user cannot update other user\'s document', async () => {
+      const user = crypto.randomUUID().replace('-', '');
+      await Promise.all([
+        assertFails(updateDoc(doc(env.authenticatedContext(user).firestore(), 'users', uid), {
+          state: { vehicle: vid },
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(user).firestore(), 'users', uid), {
+         'state.vehicle': vid,
+        })),
+      ]);
+    });
+    test('an unauthenticated user cannot update a document', async () => {
+      await Promise.all([
+        assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(), 'users', uid), {
+          state: { vehicle: vid },
+        })),
+        assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(), 'users', uid), {
+         'state.vehicle': vid,
+        })),
+      ]);
+    });
   });
 
   describe('in vehicles collection', () => {

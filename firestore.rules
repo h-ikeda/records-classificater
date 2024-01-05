@@ -6,6 +6,21 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
+    match /users/{uid} {
+      allow get: if request.auth.uid == uid;
+      allow create: if request.auth.uid == uid
+        && request.resource.data.keys().hasAll(['state'])
+        && request.resource.data.keys().hasOnly(['state'])
+        && request.resource.data.state is map
+        && request.resource.data.state.keys().hasAll(['vehicle'])
+        && request.resource.data.state.keys().hasOnly(['vehicle'])
+        && request.resource.data.state.vehicle is string;
+      allow update: if request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
+        && request.resource.data.state.diff(resource.data.state).affectedKeys().hasOnly(['vehicle'])
+        && request.resource.data.state.vehicle is string;
+    }
+
     match /vehicles/{vid} {
       allow create: if request.auth != null
         && request.resource.data.keys().hasAll(['permissions', 'classes'])
@@ -15,14 +30,11 @@ service cloud.firestore {
         && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
         && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
         && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
-      allow list: if request.auth != null
-        && request.auth.uid in resource.data.permissions.read;
+      allow list: if request.auth.uid in resource.data.permissions.read;
 
       match /trips/{tid} {
-        allow get, list: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.read;
-        allow create: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.write
+        allow get, list: if request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.read;
+        allow create: if request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.write
           && request.resource.data.class in get(/databases/$(database)/documents/vehicles/$(vid)).data.classes;
       }
 
