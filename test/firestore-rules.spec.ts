@@ -231,6 +231,18 @@ describe('Firestore security rules', () => {
     test('an unauthenticated user cannot list vehicles', async () => {
       await assertFails(getDocs(collection(env.unauthenticatedContext().firestore(), 'vehicles')));
     });
+    test('readable users can get a document', async () => {
+      await Promise.all([
+        assertSucceeds(getDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid))),
+        assertSucceeds(getDoc(doc(env.authenticatedContext(readOnlyUid).firestore(), 'vehicles', vid))),
+      ]);
+    });
+    test('non readable users cannot get a document', async () => {
+      await Promise.all([
+        assertFails(getDoc(doc(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid))),
+        assertFails(getDoc(doc(env.authenticatedContext(crypto.randomUUID().replace('-', '')).firestore(), 'vehicles', vid))),
+      ]);
+    });
 
     describe('in trips collection', () => {
       test('new trip by a permitted user should be accepted', async () => {

@@ -30,7 +30,7 @@ service cloud.firestore {
         && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
         && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
         && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
-      allow list: if request.auth.uid in resource.data.permissions.read;
+      allow list, get: if request.auth.uid in resource.data.permissions.read;
 
       match /trips/{tid} {
         allow get, list: if request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.read;
