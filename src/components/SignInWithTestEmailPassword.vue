@@ -6,7 +6,7 @@
 
 <script setup>
 import { createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, addDoc, Timestamp, collection } from 'firebase/firestore';
 
 const auth = getAuth();
 
@@ -45,6 +45,14 @@ function signIn() {
         odo: 370,
         timestamp: Timestamp.fromMillis(now),
       }],
+    });
+    addDoc(collection(getFirestore(), 'vehicles'), {
+      name: '他人のテスト車両',
+      classes: ['太郎', '花子'],
+      permissions: {
+        read: [user.uid],
+        write: [user.uid],
+      },
     });
   });
 }
