@@ -114,6 +114,7 @@ watch(currentUser, (user, oldUser, invalidate) => {
       await batch1
         .set(newVehicle, {
           classes,
+          name,
           permissions: {
             read: [currentUser.value.uid],
             write: [currentUser.value.uid],
