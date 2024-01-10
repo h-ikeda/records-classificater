@@ -1,8 +1,11 @@
 <template>
-  <section>
-    <select @change="setCurrentVehicle">
+  <section class="flex gap-4 items-end">
+    <select @change="setCurrentVehicle" class="mt-2 ml-1">
       <option v-for="{ id, name } in vehicles" :value="id">{{ name }}</option>
     </select>
+    <button class="text-sm text-blue-700 underline" @click="share">
+      共有する
+    </button>
   </section>
   <section class="my-2 border-y-4 py-1 border-gray-300">
     <h3 class="font-black text-sm text-center mb-1">Summary</h3>
@@ -38,7 +41,7 @@
 
 <script setup lang="ts">
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, setDoc, query, collection, writeBatch, getDoc, Unsubscribe, where, updateDoc } from 'firebase/firestore';
+import { getFirestore, onSnapshot, doc, addDoc, setDoc, query, collection, writeBatch, getDoc, Unsubscribe, where, updateDoc, arrayUnion } from 'firebase/firestore';
 import type { Ref } from 'vue';
 import { toRefs, watch, ref, computed } from 'vue';
 import NewTrip from './components/NewTrip.vue';
@@ -73,6 +76,17 @@ function setCurrentVehicle(id) {
   updateDoc(doc(db, 'users', currentUser.value.uid), {
     'state.vehicle': id,
   });
+}
+
+function share() {
+  if (!currentVehicleId.value) return;
+  const id = prompt('共有相手のIDを入力してください');
+  if (id) {
+    updateDoc(doc(db, 'vehicles', currentVehicleId.value).withConverter(vehicleConverter), {
+      'permissions.read': arrayUnion(id),
+      'permissions.write': arrayUnion(id),
+    });
+  }
 }
 
 const db = getFirestore();
