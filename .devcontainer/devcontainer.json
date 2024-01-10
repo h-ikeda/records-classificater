@@ -20,9 +20,10 @@
   "customizations": {
     "vscode": {
 		  "extensions": [
-			  "Vue.volar",
-			  "github.vscode-github-actions"
-		  ]
+        "Vue.volar",
+        "github.vscode-github-actions",
+        "ms-vscode-remote.remote-containers"
+      ]
 	  }
   },
 

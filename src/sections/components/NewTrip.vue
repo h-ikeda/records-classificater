@@ -7,8 +7,7 @@
     <label class="flex items-center space-x-2">
       <span class="after:content-[':']">分類</span>
       <select v-model="newClass" class="text-xl">
-        <option>Business</option>
-        <option>Private</option>
+        <option v-for="classOption in classOptions">{{ classOption }}</option>
       </select>
     </label>
     <label class="grid items-center space-x-2">
@@ -34,8 +33,9 @@ import { ref, toRefs, watch, computed, onMounted, nextTick } from 'vue';
 
 const props = defineProps({
   minOdo: { type: Number, default: 0 },
+  classOptions: { type: Array },
 });
-const { minOdo } = toRefs(props);
+const { minOdo, classOptions } = toRefs(props);
 const odoInput = ref(null);
 
 const emit = defineEmits({
@@ -58,7 +58,7 @@ const newHours = ref(now.getHours());
 const newMinutes = ref(now.getMinutes());
 const newSeconds = ref(now.getSeconds());
 const newMilliseconds = ref(now.getMilliseconds());
-const newClass = ref('Business');
+const newClass = ref(classOptions.value[0]);
 
 const newTrip = computed(() => {
   const createDate = new Date(newYear.value, newMonth.value - 1, newDate.value, newHours.value, newMinutes.value, newSeconds.value, newMilliseconds.value);
