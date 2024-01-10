@@ -30,6 +30,7 @@ describe('Firestore security rules', () => {
           write: [uid, writeOnlyUid],
         },
         classes: ['Business', 'Private'],
+        name: 'カローラ',
       }));
       ({ id: tid } = await addDoc(collection(firestore, 'vehicles', vid, 'trips'), {
         timestamp: Timestamp.fromDate(offsetHours(new Date(), -2)),
@@ -90,6 +91,7 @@ describe('Firestore security rules', () => {
     test('an user can update state.vehicle field', async () => {
       const { id: vehicle } = await addDoc(collection(env.authenticatedContext(uid).firestore(), 'vehicles'), {
         classes: ['S'],
+        name: 'ランサー',
         permissions: {
           read: [uid],
           write: [uid],
@@ -153,6 +155,7 @@ describe('Firestore security rules', () => {
       await Promise.all([
         assertSucceeds(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
           permissions: {
             write: [user],
             read: [user, crypto.randomUUID().replace('-', '')],
@@ -160,12 +163,14 @@ describe('Firestore security rules', () => {
         })),
         assertSucceeds(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
           permissions: {
             read: [user],
           },
         })),
         assertSucceeds(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
           permissions: {
             write: [user],
           },
@@ -176,6 +181,7 @@ describe('Firestore security rules', () => {
       const user = crypto.randomUUID().replace('-', '');
       await Promise.all([
         assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          name: 'フィット',
           permissions: {
             write: [user],
             read: [user],
@@ -183,6 +189,7 @@ describe('Firestore security rules', () => {
         })),
         assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: 'ClassString',
+          name: 'フィット',
           permissions: {
             write: [user],
             read: [user],
@@ -190,9 +197,26 @@ describe('Firestore security rules', () => {
         })),
         assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          permissions: {
+            write: [user],
+            read: [user],
+          },
         })),
         assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          name: 1,
+          permissions: {
+            write: [user],
+            read: [user],
+          },
+        })),
+        assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
+        })),
+        assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
           permissions: {
             write: 'uid',
             read: [user],
@@ -200,6 +224,7 @@ describe('Firestore security rules', () => {
         })),
         assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
           classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
           permissions: {
             write: [user],
             read: 'uid',
@@ -210,6 +235,7 @@ describe('Firestore security rules', () => {
     test('new vehicle by an unauthenticated user should be denied', async () => {
       await assertFails(addDoc(collection(env.unauthenticatedContext().firestore(), 'vehicles'), {
         classes: ['Class1', 'Class2', 'Class3'],
+        name: 'レガシィ',
         permissions: {
           write: [crypto.randomUUID().replace('-', '')],
           read: [crypto.randomUUID().replace('-', '')],

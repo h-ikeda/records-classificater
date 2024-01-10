@@ -27,10 +27,11 @@ service cloud.firestore {
 
     match /vehicles/{vid} {
       allow create: if request.auth != null
-        && request.resource.data.keys().hasAll(['permissions', 'classes'])
-        && request.resource.data.keys().hasOnly(['permissions', 'classes'])
+        && request.resource.data.keys().hasAll(['permissions', 'classes', 'name'])
+        && request.resource.data.keys().hasOnly(['permissions', 'classes', 'name'])
         && request.resource.data.classes is list
         && request.resource.data.permissions is map
+        && request.resource.data.name is string
         && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
         && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
         && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
