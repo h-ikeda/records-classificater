@@ -1,6 +1,6 @@
 <template>
   <section class="flex gap-4 items-end">
-    <select @change="setCurrentVehicle" class="mt-2 ml-1">
+    <select @change="setCurrentVehicle" :value="currentVehicleId" class="mt-2 ml-1">
       <option v-for="{ id, name } in vehicles" :value="id">{{ name }}</option>
     </select>
     <button class="text-sm text-blue-700 underline" @click="share">
@@ -72,9 +72,9 @@ interface VehicleIdentified extends Vehicle {
 
 const vehicles: Ref<VehicleIdentified[]> = ref([]);
 
-function setCurrentVehicle(id) {
+function setCurrentVehicle(event) {
   updateDoc(doc(db, 'users', currentUser.value.uid), {
-    'state.vehicle': id,
+    'state.vehicle': event.target.value,
   });
 }
 
