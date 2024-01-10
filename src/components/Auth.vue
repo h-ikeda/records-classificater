@@ -1,9 +1,9 @@
 <template>
-  <nav class="grid grid-col gap-2">
+  <nav class="flex gap-2 text-red-700">
+    <DeleteAccount v-if="local && currentUser" :current-user="currentUser"/>
     <SignOut v-if="currentUser" />
     <SignInWithTestEmailPassword v-else-if="dev" />
     <SignInWithGoogle v-else />
-    <DeleteAccount v-if="local && currentUser" :current-user="currentUser"/>
   </nav>
 </template>
 
