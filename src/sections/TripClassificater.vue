@@ -7,9 +7,13 @@
       共有する
     </button>
   </section>
-  <section class="my-2 border-y-4 py-1 border-gray-300">
-    <h3 class="font-black text-sm text-center mb-1">Summary</h3>
-    <dl class="grid grid-flow-row w-fit gap-x-2 mx-auto auto-cols-fr">
+  <section class="my-2 border-y-4 py-1 border-gray-300 grid justify-center gap-2">
+    <button @click="currentYear -= 1">＜-</button>
+    <h3 class="font-black col-start-2">
+      {{ currentYear }} Summary
+    </h3>
+    <button class="col-start-3" @click="currentYear += 1">-＞</button>
+    <dl class="col-span-3 grid grid-flow-row w-fit gap-x-2 mx-auto auto-cols-fr">
       <template v-for="(value, key) in classSummaries" :key="key">
         <dt class="row-start-1 text-xs bg-gray-300 px-2 text-center font-medium">{{ key }}</dt>
         <dd class="row-start-2 text-end border-b px-1">{{ formatNumber(value) }} km</dd>
@@ -58,6 +62,8 @@ const { currentUser } = toRefs(props);
 const currentVehicleId: Ref<string|null> = ref(null);
 const vehicleClasses: Ref<string[]> = ref([]);
 
+const currentYear = ref((new Date()).getFullYear());
+
 interface TripIdentified extends Trip {
   id: string,
 }
@@ -100,15 +106,18 @@ const calculatedTrips: Ref<TripCalculated[]> = computed(() => {
     return [acc, trip.odo];
   }, [[{ ...first, trip: 0 }], first.odo])[0];
 });
-const classSummaries = computed(() => calculatedTrips.value.reduce((acc, { class: c, trip }) => {
+const classSummaries = computed(() => calculatedTrips.value.filter(({ timestamp }) => {
+  return timestamp.toDate().getFullYear() === currentYear.value;
+}).reduce((acc, { class: c, trip }) => {
   if (!(c in acc)) acc[c] = 0;
   if (trip !== undefined) acc[c] += trip;
   return acc;
 }, {}));
 const sum = computed(() => {
-  const [first] = trips.value;
-  const last = trips.value.at(-1);
-  if (!last || first === last) return 0;
+  const last = [...calculatedTrips.value].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear.value);
+  let first = [...calculatedTrips.value].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear.value - 1);
+  if (!first) first = calculatedTrips.value.find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear.value);
+  if (!first || !last) return 0;
   return last.odo - first.odo;
 });
 

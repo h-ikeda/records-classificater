@@ -19,27 +19,27 @@ function signIn() {
       data: [{
         class: 'Private',
         odo: 140,
-        timestamp: Timestamp.fromMillis(now - 5.92 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 10 * 5.92 * 24 * 3600 * 1000),
       }, {
         class: 'Business',
         odo: 199,
-        timestamp: Timestamp.fromMillis(now - 5.03 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 10 * 5.03 * 24 * 3600 * 1000),
       }, {
         class: 'Business',
         odo: 323,
-        timestamp: Timestamp.fromMillis(now - 4.05 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 5 * 4.05 * 24 * 3600 * 1000),
       }, {
         class: 'Private',
         odo: 342,
-        timestamp: Timestamp.fromMillis(now - 2.8 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 5 * 2.8 * 24 * 3600 * 1000),
       }, {
         class: 'Private',
         odo: 369,
-        timestamp: Timestamp.fromMillis(now - 2.1 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 3 * 2.1 * 24 * 3600 * 1000),
       }, {
         class: 'Business',
         odo: 369.9,
-        timestamp: Timestamp.fromMillis(now - 0.9 * 24 * 3600 * 1000),
+        timestamp: Timestamp.fromMillis(now - 3 * 0.9 * 24 * 3600 * 1000),
       }, {
         class: 'Private',
         odo: 370,
