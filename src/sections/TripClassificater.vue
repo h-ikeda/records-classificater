@@ -92,10 +92,14 @@ function share() {
 const db = getFirestore();
 const trips: Ref<TripIdentified[]> = ref([]);
 const newTripEnabled = ref(false);
-const calculatedTrips: Ref<TripCalculated[]> = computed(() => trips.value.sort(sortByTimestamp).reduce(([acc, odo]: [TripCalculated[], number], trip: TripIdentified): [TripCalculated[], number] => {
-  acc.push({ ...trip, trip: trip.odo - odo });
-  return [acc, trip.odo];
-}, [[], 0])[0]);
+const calculatedTrips: Ref<TripCalculated[]> = computed(() => {
+  const [first, ...remains] = trips.value.sort(sortByTimestamp);
+  if (!first) return [];
+  return remains.reduce(([acc, odo]: [TripCalculated[], number], trip: TripIdentified): [TripCalculated[], number] => {
+    acc.push({ ...trip, trip: trip.odo - odo });
+    return [acc, trip.odo];
+  }, [[{ ...first, trip: 0 }], first.odo])[0];
+});
 const classSummaries = computed(() => calculatedTrips.value.reduce((acc, { class: c, trip }) => {
   if (!(c in acc)) acc[c] = 0;
   if (trip !== undefined) acc[c] += trip;
