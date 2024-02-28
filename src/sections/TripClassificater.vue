@@ -226,9 +226,13 @@ function sortByTimestamp({ timestamp: t1 }, { timestamp: t2 }) {
   return t1 - t2;
 }
 
-function createTrip(trip) {
+function createTrip(trip: Trip) {
+  const prevTrip = [...calculatedTrips.value].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
+  const nextTrip = calculatedTrips.value.find(({ timestamp }) => trip.timestamp.seconds < timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds < timestamp.nanoseconds);
+  if (prevTrip && trip.odo <= prevTrip.odo) return;
+  if (nextTrip && trip.odo >= nextTrip.odo) return;
   if (!currentVehicleId.value) return;
-  addDoc(collection(db, 'vehicles', currentVehicleId.value, 'trips'), trip);
+  addDoc(collection(db, 'vehicles', currentVehicleId.value, 'trips').withConverter(tripConverter), trip);
   newTripEnabled.value = false;
 }
 
