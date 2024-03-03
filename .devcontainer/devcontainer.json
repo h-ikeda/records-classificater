@@ -22,8 +22,7 @@
 		  "extensions": [
         "Vue.volar",
         "github.vscode-github-actions",
-        "ms-vscode-remote.remote-containers",
-        "Vue.vscode-typescript-vue-plugin"
+        "ms-vscode-remote.remote-containers"
       ]
 	  }
   },
