@@ -12,7 +12,7 @@
     "tailwindcss": "^3.4.10",
     "ts-jest": "^29.2.4",
     "typescript": "^5.5.4",
-    "vue": "^3.4.38"
+    "vue": "^3.5.0"
   },
   "scripts": {
     "start": "firebase emulators:exec --only=auth,firestore parcel",
