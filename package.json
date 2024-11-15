@@ -1,6 +1,6 @@
 {
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^4.0.0",
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@parcel/transformer-vue": "^2.13.0",
     "@types/jest": "^29.5.14",
     "buffer": "^6.0.3",
