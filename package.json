@@ -8,7 +8,7 @@
     "jest": "^29.7.0",
     "parcel": "^2.15.2",
     "process": "^0.11.10",
-    "sass": "^1.89.0",
+    "sass": "^1.89.1",
     "tailwindcss": "^3.4.17",
     "ts-jest": "^29.3.4",
     "typescript": "^5.8.3",
