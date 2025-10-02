@@ -1,8 +1,8 @@
 <template>
-  <Loader v-if="currentUser === undefined" class="loader" />
+  <Loader v-if="currentUser === undefined" class="fixed inset-0 bg-slate-100 text-green-300 text-5xl" />
   <main v-else>
-    <nav>
-      <h2 class="font-medium">Trip classificater</h2>
+    <nav class="px-2 bg-lime-200 sticky top-0 flex">
+      <h2 class="font-medium grow">Trip classificater</h2>
       <Auth :current-user="currentUser" />
     </nav>
     <TripClassificater v-if="currentUser" :currentUser="currentUser" />
@@ -27,17 +27,3 @@ onBeforeUnmount(
   },
 ));
 </script>
-
-<style scoped lang="scss">
-.loader {
-  @apply fixed inset-0 bg-slate-100 text-green-300 text-5xl;
-}
-
-main > nav {
-  @apply px-2 bg-lime-200 sticky top-0 flex;
-
-  h2:first-child {
-    @apply grow;
-  }
-}
-</style>
