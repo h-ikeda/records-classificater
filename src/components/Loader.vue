@@ -1,14 +1,3 @@
 <template>
-  <aside />
+  <aside class="flex justify-center items-center after:content-['◎'] after:animate-ping" />
 </template>
-
-<style scoped lang="scss">
-aside {
-  @apply flex justify-center items-center;
-
-  &::after {
-    content: '◎';
-    @apply animate-ping;
-  }
-}
-</style>
