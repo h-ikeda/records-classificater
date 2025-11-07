@@ -2,7 +2,7 @@
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
     "@parcel/transformer-vue": "^2.16.1",
-    "@tailwindcss/postcss": "^4.1.16",
+    "@tailwindcss/postcss": "^4.1.17",
     "@types/jest": "^30.0.0",
     "buffer": "^6.0.3",
     "firebase": "^11.10.0",
