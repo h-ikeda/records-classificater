@@ -28,6 +28,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           java-version: latest
+          distribution: oracle
       - run: npm ci
       - run: npm i -g firebase-tools
       - run: npm test
