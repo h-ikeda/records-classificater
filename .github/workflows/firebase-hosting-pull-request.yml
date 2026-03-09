@@ -27,7 +27,7 @@ jobs:
           node-version: latest
       - uses: actions/setup-java@v5
         with:
-          java-version: latest
+          java-version: '25'
           distribution: oracle
       - run: npm ci
       - run: npm i -g firebase-tools
