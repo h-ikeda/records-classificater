@@ -1,11 +1,11 @@
 {
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^4.0.1",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@parcel/transformer-vue": "^2.16.4",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/jest": "^30.0.0",
     "buffer": "^6.0.3",
-    "firebase": "^11.10.0",
+    "firebase": "^12.14.0",
     "jest": "^30.4.2",
     "parcel": "^2.16.4",
     "process": "^0.11.10",
