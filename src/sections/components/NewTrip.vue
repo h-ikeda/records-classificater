@@ -120,8 +120,9 @@ function formatPreview(d) {
 }
 
 function onSubmit() {
-  // 調整時はその場で現在時刻を取り直し、ミリ秒精度を保つ
   const date = adjustDateTime.value ? new Date(dateTimeLocal.value) : new Date();
+  if (isNaN(date.getTime())) return;
+  if (typeof newODO.value !== 'number' || isNaN(newODO.value) || newODO.value < minOdo.value) return;
   emit('submit', {
     timestamp: Timestamp.fromDate(date),
     odo: newODO.value,

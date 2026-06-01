@@ -71,8 +71,8 @@
     v-if="currentVehicleId && !newTripEnabled"
     @click="newTripEnabled = true"
     aria-label="走行記録を追加"
-    class="fixed bottom-6 right-6 z-30 w-16 h-16 rounded-full bg-lime-500 text-white text-4xl font-light shadow-lg flex items-center justify-center active:bg-lime-600"
-    style="padding-bottom: env(safe-area-inset-bottom)"
+    class="fixed right-6 z-30 w-16 h-16 rounded-full bg-lime-500 text-white text-4xl font-light shadow-lg flex items-center justify-center active:bg-lime-600"
+    style="bottom: calc(1.5rem + env(safe-area-inset-bottom))"
   >
     ＋
   </button>
@@ -275,7 +275,7 @@ const classPalette = [
   'bg-violet-100 text-violet-800',
   'bg-cyan-100 text-cyan-800',
 ];
-function classStyle(cls) {
+function classStyle(cls: string) {
   const i = vehicleClasses.value.indexOf(cls);
   return classPalette[(i < 0 ? 0 : i) % classPalette.length];
 }
