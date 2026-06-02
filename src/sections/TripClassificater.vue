@@ -1,6 +1,6 @@
 <template>
   <!-- 車両切り替えと記録追加（よく使うので常に上部に固定） -->
-  <div class="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-white/95 backdrop-blur border-b border-gray-200 space-y-2">
+  <div class="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-white/95 backdrop-blur border-b border-gray-200 space-y-3">
     <section class="flex items-center gap-3">
       <label class="flex items-center gap-2 grow min-w-0">
         <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
