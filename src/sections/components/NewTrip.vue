@@ -40,22 +40,15 @@
     </div>
 
     <!-- 記録日時 -->
-    <div>
-      <label class="flex items-center justify-between">
-        <span class="text-xs font-medium text-gray-600">日時を調整する</span>
-        <input type="checkbox" v-model="adjustDateTime" class="w-5 h-5 accent-lime-500" />
-      </label>
-      <p v-if="!adjustDateTime" class="text-sm text-gray-500 mt-1">
-        現在時刻で記録します（{{ formatPreview(new Date()) }}）
-      </p>
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">記録日時</span>
       <input
-        v-else
         v-model="dateTimeLocal"
         type="datetime-local"
         step="1"
         class="w-full text-base border rounded-lg px-3 py-2 mt-1 border-gray-300 focus:outline-none focus:border-lime-500"
       />
-    </div>
+    </label>
 
     <!-- 操作 -->
     <div class="flex gap-3 pt-1">
@@ -101,26 +94,16 @@ watch(minOdo, (odo) => {
 
 const newClass = ref(classOptions.value[0]);
 
-// 日時は通常「現在時刻」で記録し、必要なときだけ調整する。
-const adjustDateTime = ref(false);
+// 既定値は現在時刻。必要に応じて入力欄で調整する。
 const dateTimeLocal = ref(toLocalInputValue(new Date()));
-watch(adjustDateTime, (on) => {
-  // 調整を開始したら現在時刻を初期値にする
-  if (on) dateTimeLocal.value = toLocalInputValue(new Date());
-});
 
 function toLocalInputValue(d) {
   const p = (n, len = 2) => String(n).padStart(len, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function formatPreview(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 function onSubmit() {
-  const date = adjustDateTime.value ? new Date(dateTimeLocal.value) : new Date();
+  const date = new Date(dateTimeLocal.value);
   if (isNaN(date.getTime())) return;
   if (typeof newODO.value !== 'number' || isNaN(newODO.value) || newODO.value < minOdo.value) return;
   emit('submit', {
