@@ -66,16 +66,19 @@
     </li>
   </ul>
 
-  <!-- 記録追加（主要操作なので親指で届く位置に固定） -->
-  <button
+  <!-- 記録追加（主要操作なので画面下端に固定バーで常時表示） -->
+  <div
     v-if="currentVehicleId && !newTripEnabled"
-    @click="newTripEnabled = true"
-    aria-label="走行記録を追加"
-    class="fixed right-6 z-30 w-16 h-16 rounded-full bg-lime-500 text-white text-4xl font-light shadow-lg flex items-center justify-center active:bg-lime-600"
-    style="bottom: calc(1.5rem + env(safe-area-inset-bottom))"
+    class="fixed inset-x-0 bottom-0 z-30 bg-white/95 backdrop-blur border-t border-gray-200 px-4 pt-2"
+    style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom))"
   >
-    ＋
-  </button>
+    <button
+      @click="newTripEnabled = true"
+      class="w-full bg-lime-500 text-white rounded-xl py-3 font-bold text-lg shadow active:bg-lime-600 flex items-center justify-center gap-2"
+    >
+      <span class="text-2xl font-light leading-none">＋</span> 走行を記録
+    </button>
+  </div>
 
   <!-- 入力フォーム（画面上端に固定し、キーボードに隠れないようにする） -->
   <div
