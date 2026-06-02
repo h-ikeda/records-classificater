@@ -1,29 +1,31 @@
 <template>
-  <!-- 車両切り替え（利用頻度が高いので常に上部に固定） -->
-  <section class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
-    <label class="flex items-center gap-2 grow min-w-0">
-      <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
-      <select
-        @change="setCurrentVehicle"
-        :value="currentVehicleId"
-        class="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
-      >
-        <option v-for="{ id, name } in vehicles" :key="id" :value="id">{{ name }}</option>
-      </select>
-    </label>
-    <button class="shrink-0 text-sm text-blue-700 py-2 px-2" @click="share">
-      共有
-    </button>
-  </section>
+  <!-- 車両切り替えと記録追加（よく使うので常に上部に固定） -->
+  <div class="sticky top-0 z-20 -mx-4 px-4 pt-2 pb-3 bg-white/95 backdrop-blur border-b border-gray-200 space-y-2">
+    <section class="flex items-center gap-3">
+      <label class="flex items-center gap-2 grow min-w-0">
+        <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
+        <select
+          @change="setCurrentVehicle"
+          :value="currentVehicleId"
+          class="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
+        >
+          <option v-for="{ id, name } in vehicles" :key="id" :value="id">{{ name }}</option>
+        </select>
+      </label>
+      <button class="shrink-0 text-sm text-blue-700 py-2 px-2" @click="share">
+        共有
+      </button>
+    </section>
 
-  <!-- 記録追加（主要操作なので車両選択のすぐ下に配置） -->
-  <button
-    v-if="currentVehicleId && !newTripEnabled"
-    @click="newTripEnabled = true"
-    class="mt-3 w-full bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow-sm active:bg-lime-600 flex items-center justify-center gap-1.5"
-  >
-    <span class="text-xl font-light leading-none">＋</span> 走行を記録
-  </button>
+    <!-- 記録追加（主要操作） -->
+    <button
+      v-if="currentVehicleId && !newTripEnabled"
+      @click="newTripEnabled = true"
+      class="w-full bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow-sm active:bg-lime-600 flex items-center justify-center gap-1.5"
+    >
+      <span class="text-xl font-light leading-none">＋</span> 走行を記録
+    </button>
+  </div>
 
   <!-- 年間集計（確認頻度は低いので折りたたみ） -->
   <details class="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
