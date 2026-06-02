@@ -1,6 +1,6 @@
 <template>
   <!-- 車両切り替え（利用頻度が高いので常に上部に固定） -->
-  <section class="sticky top-0 z-20 -mx-4 px-4 py-2 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
+  <section class="sticky top-0 z-20 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
     <label class="flex items-center gap-2 grow min-w-0">
       <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
       <select

@@ -1,8 +1,8 @@
 <template>
   <Loader v-if="currentUser === undefined" class="fixed inset-0 bg-slate-100 text-green-300 text-5xl" />
   <main v-else>
-    <nav class="-mx-4 px-4 py-2 bg-lime-200 flex items-center gap-2" style="padding-top: calc(0.5rem + env(safe-area-inset-top))">
-      <h2 class="font-bold grow text-gray-800">Trip classificater</h2>
+    <nav class="-mx-4 px-4 py-1.5 bg-lime-500 flex items-center gap-2" style="padding-top: calc(0.375rem + env(safe-area-inset-top))">
+      <h2 class="font-bold grow text-white">Trip classificater</h2>
       <Auth :current-user="currentUser" />
     </nav>
     <TripClassificater v-if="currentUser" :currentUser="currentUser" />
