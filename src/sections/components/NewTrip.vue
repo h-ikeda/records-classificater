@@ -1,35 +1,77 @@
 <template>
-  <aside class="space-y-3">
-    <label class="flex items-center space-x-2">
-      <span class="after:content-[':']">ODO</span>
-      <input v-model.number="newODO" :min="minOdo" type="number" ref="odoInput" class="text-xl" />
+  <form class="space-y-2" @submit.prevent="onSubmit">
+    <h3 class="text-base font-bold text-center">走行記録を追加</h3>
+
+    <!-- ODO -->
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">総走行距離 (ODO)</span>
+      <div class="flex items-baseline gap-2">
+        <input
+          v-model.number="newODO"
+          ref="odoInput"
+          type="number"
+          inputmode="decimal"
+          step="any"
+          :min="minOdo"
+          class="w-full text-2xl font-bold tabular-nums border-b-2 border-lime-500 bg-transparent focus:outline-none"
+        />
+        <span class="text-base text-gray-500">km</span>
+      </div>
+      <p v-if="minOdo > 0" class="text-xs text-gray-400">前回の記録: {{ minOdo }} km</p>
     </label>
-    <label class="flex items-center space-x-2">
-      <span class="after:content-[':']">分類</span>
-      <select v-model="newClass" class="text-xl">
-        <option v-for="classOption in classOptions">{{ classOption }}</option>
-      </select>
-    </label>
-    <label class="grid items-center space-x-2">
-      <span class="after:content-[':']">記録日時</span>
-      <input class="col-start-2" type="number" min="1970" max="9999" v-model.number="newYear" />/
-      <input class="col-start-4" type="number" min="1" max="12" v-model.number="newMonth" />/
-      <input class="col-start-6" type="number" min="1" max="31" v-model.number="newDate" />
-      <input class="col-start-2" type="number" min="0" max="23" v-model.number="newHours" />:
-      <input class="col-start-4" type="number" min="0" max="59" v-model.number="newMinutes" />:
-      <input class="col-start-6" type="number" min="0" max="59" v-model.number="newSeconds" />.
-      <input class="col-start-8" type="number" min="0" max="999" v-model.number="newMilliseconds" />
-    </label>
-    <div class="flex justify-center space-x-4 py-3">
-      <button @click="emit('cancel')" class="border-2 border-black rounded-lg px-4 py-1 font-medium">Cancel</button>
-      <button @click="emit('submit', newTrip)" class="border-2 border-black rounded-lg px-4 py-1 font-medium">Submit</button>
+
+    <!-- 分類 -->
+    <div>
+      <span class="text-xs font-medium text-gray-600">分類</span>
+      <div class="flex flex-wrap gap-2 mt-1">
+        <button
+          v-for="classOption in classOptions"
+          :key="classOption"
+          type="button"
+          @click="newClass = classOption"
+          :class="newClass === classOption
+            ? 'bg-lime-500 text-white border-lime-500'
+            : 'bg-white text-gray-700 border-gray-300'"
+          class="px-4 py-1.5 rounded-full text-base font-medium border-2 transition-colors active:scale-95"
+        >
+          {{ classOption }}
+        </button>
+      </div>
     </div>
-  </aside>
+
+    <!-- 記録日時 -->
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">記録日時</span>
+      <input
+        v-model="dateTimeLocal"
+        type="datetime-local"
+        step="1"
+        class="w-full text-base border rounded-lg px-3 py-2 mt-1 border-gray-300 focus:outline-none focus:border-lime-500"
+      />
+    </label>
+
+    <!-- 操作 -->
+    <div class="flex gap-3">
+      <button
+        type="button"
+        @click="emit('cancel')"
+        class="flex-1 border-2 border-gray-300 text-gray-600 rounded-xl py-2.5 font-medium active:bg-gray-100"
+      >
+        キャンセル
+      </button>
+      <button
+        type="submit"
+        class="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600"
+      >
+        記録する
+      </button>
+    </div>
+  </form>
 </template>
 
 <script setup>
 import { Timestamp } from 'firebase/firestore';
-import { ref, toRefs, watch, computed, onMounted, nextTick } from 'vue';
+import { ref, toRefs, watch, onMounted } from 'vue';
 
 const props = defineProps({
   minOdo: { type: Number, default: 0 },
@@ -50,21 +92,26 @@ watch(minOdo, (odo) => {
   immediate: true,
 });
 
-const now = new Date;
-const newYear = ref(now.getFullYear());
-const newMonth = ref(now.getMonth() + 1);
-const newDate = ref(now.getDate());
-const newHours = ref(now.getHours());
-const newMinutes = ref(now.getMinutes());
-const newSeconds = ref(now.getSeconds());
-const newMilliseconds = ref(now.getMilliseconds());
 const newClass = ref(classOptions.value[0]);
 
-const newTrip = computed(() => {
-  const createDate = new Date(newYear.value, newMonth.value - 1, newDate.value, newHours.value, newMinutes.value, newSeconds.value, newMilliseconds.value);
-  const timestamp = Timestamp.fromDate(createDate);
-  return { timestamp, odo: newODO.value, class: newClass.value };
-});
+// 既定値は現在時刻。必要に応じて入力欄で調整する。
+const dateTimeLocal = ref(toLocalInputValue(new Date()));
+
+function toLocalInputValue(d) {
+  const p = (n, len = 2) => String(n).padStart(len, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function onSubmit() {
+  const date = new Date(dateTimeLocal.value);
+  if (isNaN(date.getTime())) return;
+  if (typeof newODO.value !== 'number' || isNaN(newODO.value) || newODO.value < minOdo.value) return;
+  emit('submit', {
+    timestamp: Timestamp.fromDate(date),
+    odo: newODO.value,
+    class: newClass.value,
+  });
+}
 
 onMounted(() => odoInput.value.focus());
 </script>

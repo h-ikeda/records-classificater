@@ -1,46 +1,95 @@
 <template>
-  <section class="flex gap-4 items-end">
-    <select @change="setCurrentVehicle" :value="currentVehicleId" class="mt-2 ml-1">
-      <option v-for="{ id, name } in vehicles" :value="id">{{ name }}</option>
-    </select>
-    <button class="text-sm text-blue-700 underline" @click="share">
-      共有する
+  <!-- 車両切り替え（利用頻度が高いので常に上部に固定） -->
+  <section class="sticky top-0 z-20 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
+    <label class="flex items-center gap-2 grow min-w-0">
+      <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
+      <select
+        @change="setCurrentVehicle"
+        :value="currentVehicleId"
+        class="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
+      >
+        <option v-for="{ id, name } in vehicles" :key="id" :value="id">{{ name }}</option>
+      </select>
+    </label>
+    <button class="shrink-0 text-sm text-blue-700 py-2 px-2" @click="share">
+      共有
     </button>
   </section>
-  <section class="my-2 border-y-4 py-1 border-gray-300 grid justify-center gap-2">
-    <button @click="currentYear -= 1">＜-</button>
-    <h3 class="font-black col-start-2">
-      {{ currentYear }} Summary
-    </h3>
-    <button class="col-start-3" @click="currentYear += 1">-＞</button>
-    <dl class="col-span-3 grid grid-flow-row w-fit gap-x-2 mx-auto auto-cols-fr">
-      <template v-for="(value, key) in classSummaries" :key="key">
-        <dt class="row-start-1 text-xs bg-gray-300 px-2 text-center font-medium">{{ key }}</dt>
-        <dd class="row-start-2 text-end border-b px-1">{{ formatNumber(value) }} km</dd>
-        <dd class="text-sm text-end px-1" v-if="sum">{{ Math.round(value / sum * 1000) / 10 }} %</dd>
-      </template>
-    </dl>
-  </section>
-  <ul class="w-fit mx-auto flex flex-col-reverse">
-    <li v-for="{timestamp, odo, trip, class: cls} in calculatedTrips" class="border-b-2 border-gray-500 my-4">
-      <dl class="grid items-center gap-x-2">
-        <dt class="after:content-[':'] text-sm">記録日時</dt>
-        <dd class="col-start-2 border-b border-dotted border-black my-1">{{ formatDate(timestamp) }}</dd>
-        <dt class="after:content-[':'] text-sm">総走行距離 (ODO)</dt>
-        <dd class="text-lg text-end border-b border-dotted border-black">{{ formatNumber(odo) }} km</dd>
-        <template v-if="trip !== undefined">
-          <dt class="after:content-[':'] text-sm">走行距離 (TRIP)</dt>
-          <dd class="text-lg text-end border-b border-dotted border-black">{{ formatNumber(trip) }} km</dd>
-        </template>
-        <dt class="after:content-[':'] text-sm">分類</dt>
-        <dd class="text-sm my-1">{{ cls }}</dd>
+
+  <!-- 年間集計（確認頻度は低いので折りたたみ） -->
+  <details class="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+    <summary class="cursor-pointer select-none px-4 py-3 font-bold text-gray-700 flex items-center gap-2">
+      <span class="text-lime-600">📊</span>
+      {{ currentYear }}年の集計
+    </summary>
+    <div class="px-4 pb-4 space-y-3">
+      <div class="flex items-center justify-center gap-4">
+        <button class="w-9 h-9 rounded-full border border-gray-300 text-gray-600 active:bg-gray-200" @click="currentYear -= 1">‹</button>
+        <span class="font-black text-lg tabular-nums">{{ currentYear }}</span>
+        <button class="w-9 h-9 rounded-full border border-gray-300 text-gray-600 active:bg-gray-200" @click="currentYear += 1">›</button>
+      </div>
+      <dl v-if="Object.keys(classSummaries).length" class="space-y-2">
+        <div v-for="(value, key) in classSummaries" :key="key" class="flex items-center gap-3">
+          <dt :class="classStyle(key)" class="shrink-0 text-xs font-medium px-2 py-1 rounded-full">{{ key }}</dt>
+          <dd class="grow text-right tabular-nums font-medium">{{ formatNumber(value) }} km</dd>
+          <dd class="w-16 text-right text-sm text-gray-500 tabular-nums" v-if="sum">{{ Math.round(value / sum * 1000) / 10 }} %</dd>
+        </div>
       </dl>
+      <p v-else class="text-center text-sm text-gray-400 py-2">記録がありません</p>
+    </div>
+  </details>
+
+  <!-- 走行記録一覧（新しい順） -->
+  <ul class="space-y-3 pb-28">
+    <li
+      v-for="{ id, timestamp, odo, trip, class: cls } in displayTrips"
+      :key="id"
+      class="rounded-xl border border-gray-200 bg-white shadow-sm p-4"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-sm text-gray-500 tabular-nums">{{ formatDate(timestamp) }}</span>
+        <span :class="classStyle(cls)" class="text-xs font-medium px-2.5 py-1 rounded-full">{{ cls }}</span>
+      </div>
+      <div class="mt-3 flex items-end justify-between gap-4">
+        <div v-if="trip" class="flex flex-col">
+          <span class="text-xs text-gray-400">走行 (TRIP)</span>
+          <span class="text-2xl font-bold tabular-nums text-gray-800">{{ formatNumber(trip) }}<span class="text-sm font-normal text-gray-500 ml-1">km</span></span>
+        </div>
+        <div class="flex flex-col items-end ml-auto">
+          <span class="text-xs text-gray-400">総距離 (ODO)</span>
+          <span class="text-lg font-medium tabular-nums text-gray-600">{{ formatNumber(odo) }}<span class="text-sm font-normal text-gray-400 ml-1">km</span></span>
+        </div>
+      </div>
     </li>
-    <li class="w-fit mx-auto py-4" v-if="currentVehicleId">
-      <button v-if="!newTripEnabled" @click="newTripEnabled = true" class="border-2 rounded-full w-10 h-10 border-gray-500 text-gray-500 text-xl font-bold flex items-center justify-center">+</button>
-      <NewTrip v-if="newTripEnabled" class="border-b py-4 border-gray-500" :min-odo="lastODO" @submit="createTrip" @cancel="newTripEnabled = false" :classOptions="vehicleClasses" />
+    <li v-if="!displayTrips.length" class="text-center text-gray-400 py-10">
+      まだ記録がありません。<br />下のボタンから追加できます。
     </li>
   </ul>
+
+  <!-- 記録追加（主要操作なので画面下端に固定バーで常時表示） -->
+  <div
+    v-if="currentVehicleId && !newTripEnabled"
+    class="fixed inset-x-0 bottom-0 z-30 bg-white/80 backdrop-blur border-t border-gray-200 px-4 pt-4"
+    style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom))"
+  >
+    <button
+      @click="newTripEnabled = true"
+      class="w-full bg-lime-500 text-white rounded-xl py-3 font-bold text-lg shadow active:bg-lime-600 flex items-center justify-center gap-2"
+    >
+      <span class="text-2xl font-light leading-none">＋</span> 走行を記録
+    </button>
+  </div>
+
+  <!-- 入力フォーム（画面上端に固定し、キーボードに隠れないようにする） -->
+  <div
+    v-if="newTripEnabled"
+    class="fixed inset-0 z-40 flex items-start bg-black/40"
+    @click.self="newTripEnabled = false"
+  >
+    <div class="w-full bg-white rounded-b-2xl px-5 pb-4 max-h-full overflow-y-auto shadow-2xl" style="padding-top: calc(0.5rem + env(safe-area-inset-top))">
+      <NewTrip :min-odo="lastODO" @submit="createTrip" @cancel="newTripEnabled = false" :classOptions="vehicleClasses" />
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -211,11 +260,28 @@ watch(currentVehicleId, (vehicleId, oldVehicleId, invalidate) => {
   immediate:true,
 });
 
+// 一覧は新しい順に表示する（trip の差分計算は古い順のまま）
+const displayTrips = computed(() => [...calculatedTrips.value].reverse());
+
 const lastODO = computed(() => {
   const last = trips.value.at(-1);
   if (!last) return 0;
   return last.odo;
 });
+
+// 分類ごとに色を割り当て、業務用と私用を一目で見分けられるようにする
+const classPalette = [
+  'bg-blue-100 text-blue-800',
+  'bg-amber-100 text-amber-800',
+  'bg-emerald-100 text-emerald-800',
+  'bg-rose-100 text-rose-800',
+  'bg-violet-100 text-violet-800',
+  'bg-cyan-100 text-cyan-800',
+];
+function classStyle(cls: string) {
+  const i = vehicleClasses.value.indexOf(cls);
+  return classPalette[(i < 0 ? 0 : i) % classPalette.length];
+}
 
 function formatDate(timestamp) {
   const d = timestamp.toDate();
