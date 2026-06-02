@@ -69,7 +69,7 @@
   <!-- 記録追加（主要操作なので画面下端に固定バーで常時表示） -->
   <div
     v-if="currentVehicleId && !newTripEnabled"
-    class="fixed inset-x-0 bottom-0 z-30 bg-white/95 backdrop-blur border-t border-gray-200 px-4 pt-2"
+    class="fixed inset-x-0 bottom-0 z-30 bg-white/80 backdrop-blur border-t border-gray-200 px-4 pt-4"
     style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom))"
   >
     <button
