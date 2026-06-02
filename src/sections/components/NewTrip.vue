@@ -1,5 +1,5 @@
 <template>
-  <form class="space-y-3" @submit.prevent="onSubmit">
+  <form class="space-y-2" @submit.prevent="onSubmit">
     <h3 class="text-base font-bold text-center">走行記録を追加</h3>
 
     <!-- ODO -->
@@ -17,7 +17,7 @@
         />
         <span class="text-base text-gray-500">km</span>
       </div>
-      <p v-if="minOdo > 0" class="text-xs text-gray-400">前回の記録: {{ minOdo }} km 以上</p>
+      <p v-if="minOdo > 0" class="text-xs text-gray-400">前回の記録: {{ minOdo }} km</p>
     </label>
 
     <!-- 分類 -->
@@ -51,7 +51,7 @@
     </label>
 
     <!-- 操作 -->
-    <div class="flex gap-3 pt-1">
+    <div class="flex gap-3">
       <button
         type="button"
         @click="emit('cancel')"

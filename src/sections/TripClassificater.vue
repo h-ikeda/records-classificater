@@ -83,7 +83,7 @@
     class="fixed inset-0 z-40 flex items-start bg-black/40"
     @click.self="newTripEnabled = false"
   >
-    <div class="w-full bg-white rounded-b-2xl px-5 pb-5 max-h-full overflow-y-auto shadow-2xl" style="padding-top: calc(0.75rem + env(safe-area-inset-top))">
+    <div class="w-full bg-white rounded-b-2xl px-5 pb-4 max-h-full overflow-y-auto shadow-2xl" style="padding-top: calc(0.5rem + env(safe-area-inset-top))">
       <NewTrip :min-odo="lastODO" @submit="createTrip" @cancel="newTripEnabled = false" :classOptions="vehicleClasses" />
     </div>
   </div>
