@@ -16,6 +16,15 @@
     </button>
   </section>
 
+  <!-- 記録追加（主要操作なので車両選択のすぐ下に配置） -->
+  <button
+    v-if="currentVehicleId && !newTripEnabled"
+    @click="newTripEnabled = true"
+    class="mt-3 w-full bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow-sm active:bg-lime-600 flex items-center justify-center gap-1.5"
+  >
+    <span class="text-xl font-light leading-none">＋</span> 走行を記録
+  </button>
+
   <!-- 年間集計（確認頻度は低いので折りたたみ） -->
   <details class="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
     <summary class="cursor-pointer select-none px-4 py-3 font-bold text-gray-700 flex items-center gap-2">
@@ -40,7 +49,7 @@
   </details>
 
   <!-- 走行記録一覧（新しい順） -->
-  <ul class="space-y-3 pb-28">
+  <ul class="space-y-3 pb-8">
     <li
       v-for="{ id, timestamp, odo, trip, class: cls } in displayTrips"
       :key="id"
@@ -65,20 +74,6 @@
       まだ記録がありません。<br />右下の「＋」から追加できます。
     </li>
   </ul>
-
-  <!-- 記録追加（主要操作なので画面下端に固定バーで常時表示） -->
-  <div
-    v-if="currentVehicleId && !newTripEnabled"
-    class="fixed inset-x-0 bottom-0 z-30 bg-white/95 backdrop-blur border-t border-gray-200 px-4 pt-2"
-    style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom))"
-  >
-    <button
-      @click="newTripEnabled = true"
-      class="w-full bg-lime-500 text-white rounded-xl py-3 font-bold text-lg shadow active:bg-lime-600 flex items-center justify-center gap-2"
-    >
-      <span class="text-2xl font-light leading-none">＋</span> 走行を記録
-    </button>
-  </div>
 
   <!-- 入力フォーム（画面上端に固定し、キーボードに隠れないようにする） -->
   <div
