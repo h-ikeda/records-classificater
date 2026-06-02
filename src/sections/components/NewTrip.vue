@@ -1,10 +1,10 @@
 <template>
-  <form class="space-y-5" @submit.prevent="onSubmit">
-    <h3 class="text-lg font-bold text-center">走行記録を追加</h3>
+  <form class="space-y-3" @submit.prevent="onSubmit">
+    <h3 class="text-base font-bold text-center">走行記録を追加</h3>
 
     <!-- ODO -->
-    <label class="block space-y-1">
-      <span class="text-sm font-medium text-gray-600">総走行距離 (ODO)</span>
+    <label class="block">
+      <span class="text-xs font-medium text-gray-600">総走行距離 (ODO)</span>
       <div class="flex items-baseline gap-2">
         <input
           v-model.number="newODO"
@@ -13,17 +13,17 @@
           inputmode="decimal"
           step="any"
           :min="minOdo"
-          class="w-full text-3xl font-bold tabular-nums border-b-2 border-lime-500 bg-transparent py-1 focus:outline-none"
+          class="w-full text-2xl font-bold tabular-nums border-b-2 border-lime-500 bg-transparent focus:outline-none"
         />
-        <span class="text-lg text-gray-500">km</span>
+        <span class="text-base text-gray-500">km</span>
       </div>
       <p v-if="minOdo > 0" class="text-xs text-gray-400">前回の記録: {{ minOdo }} km 以上</p>
     </label>
 
     <!-- 分類 -->
-    <div class="space-y-1">
-      <span class="text-sm font-medium text-gray-600">分類</span>
-      <div class="flex flex-wrap gap-2">
+    <div>
+      <span class="text-xs font-medium text-gray-600">分類</span>
+      <div class="flex flex-wrap gap-2 mt-1">
         <button
           v-for="classOption in classOptions"
           :key="classOption"
@@ -32,7 +32,7 @@
           :class="newClass === classOption
             ? 'bg-lime-500 text-white border-lime-500'
             : 'bg-white text-gray-700 border-gray-300'"
-          class="px-4 py-2 rounded-full text-base font-medium border-2 transition-colors active:scale-95"
+          class="px-4 py-1.5 rounded-full text-base font-medium border-2 transition-colors active:scale-95"
         >
           {{ classOption }}
         </button>
@@ -40,12 +40,12 @@
     </div>
 
     <!-- 記録日時 -->
-    <div class="space-y-2">
+    <div>
       <label class="flex items-center justify-between">
-        <span class="text-sm font-medium text-gray-600">日時を調整する</span>
+        <span class="text-xs font-medium text-gray-600">日時を調整する</span>
         <input type="checkbox" v-model="adjustDateTime" class="w-5 h-5 accent-lime-500" />
       </label>
-      <p v-if="!adjustDateTime" class="text-sm text-gray-500">
+      <p v-if="!adjustDateTime" class="text-sm text-gray-500 mt-1">
         現在時刻で記録します（{{ formatPreview(new Date()) }}）
       </p>
       <input
@@ -53,22 +53,22 @@
         v-model="dateTimeLocal"
         type="datetime-local"
         step="1"
-        class="w-full text-lg border rounded-lg px-3 py-2 border-gray-300 focus:outline-none focus:border-lime-500"
+        class="w-full text-base border rounded-lg px-3 py-2 mt-1 border-gray-300 focus:outline-none focus:border-lime-500"
       />
     </div>
 
     <!-- 操作 -->
-    <div class="flex gap-3 pt-2">
+    <div class="flex gap-3 pt-1">
       <button
         type="button"
         @click="emit('cancel')"
-        class="flex-1 border-2 border-gray-300 text-gray-600 rounded-xl py-3 font-medium active:bg-gray-100"
+        class="flex-1 border-2 border-gray-300 text-gray-600 rounded-xl py-2.5 font-medium active:bg-gray-100"
       >
         キャンセル
       </button>
       <button
         type="submit"
-        class="flex-1 bg-lime-500 text-white rounded-xl py-3 font-bold shadow active:bg-lime-600"
+        class="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600"
       >
         記録する
       </button>

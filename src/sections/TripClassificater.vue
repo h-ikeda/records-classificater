@@ -77,13 +77,13 @@
     ＋
   </button>
 
-  <!-- 入力フォーム（ボトムシート） -->
+  <!-- 入力フォーム（画面上端に固定し、キーボードに隠れないようにする） -->
   <div
     v-if="newTripEnabled"
-    class="fixed inset-0 z-40 flex items-end bg-black/40"
+    class="fixed inset-0 z-40 flex items-start bg-black/40"
     @click.self="newTripEnabled = false"
   >
-    <div class="w-full bg-white rounded-t-2xl p-5 max-h-[92vh] overflow-y-auto shadow-2xl" style="padding-bottom: calc(1.25rem + env(safe-area-inset-bottom))">
+    <div class="w-full bg-white rounded-b-2xl px-5 pb-5 max-h-full overflow-y-auto shadow-2xl" style="padding-top: calc(0.75rem + env(safe-area-inset-top))">
       <NewTrip :min-odo="lastODO" @submit="createTrip" @cancel="newTripEnabled = false" :classOptions="vehicleClasses" />
     </div>
   </div>
