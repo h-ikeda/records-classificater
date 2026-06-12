@@ -1,16 +1,11 @@
 <template>
   <!-- 車両切り替え（利用頻度が高いので常に上部に固定） -->
   <section class="sticky top-0 z-20 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
-    <label class="flex items-center gap-2 grow min-w-0">
-      <span class="text-sm font-medium text-gray-500 shrink-0">車両</span>
-      <select
-        @change="setCurrentVehicle"
-        :value="currentVehicleId"
-        class="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
-      >
-        <option v-for="{ id, name } in vehicles" :key="id" :value="id">{{ name }}</option>
-      </select>
-    </label>
+    <VehicleSelector
+      :vehicles="vehicles"
+      :current-vehicle-id="currentVehicleId"
+      @select="setCurrentVehicle"
+    />
     <button class="shrink-0 text-sm text-blue-700 py-2 px-2" @click="share">
       共有
     </button>
@@ -98,6 +93,7 @@ import { getFirestore, onSnapshot, doc, addDoc, setDoc, query, collection, write
 import type { Ref } from 'vue';
 import { toRefs, watch, ref, computed } from 'vue';
 import NewTrip from './components/NewTrip.vue';
+import VehicleSelector from './components/VehicleSelector.vue';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
@@ -127,9 +123,9 @@ interface VehicleIdentified extends Vehicle {
 
 const vehicles: Ref<VehicleIdentified[]> = ref([]);
 
-function setCurrentVehicle(event) {
+function setCurrentVehicle(vehicleId: string) {
   updateDoc(doc(db, 'users', currentUser.value.uid), {
-    'state.vehicle': event.target.value,
+    'state.vehicle': vehicleId,
   });
 }
 
