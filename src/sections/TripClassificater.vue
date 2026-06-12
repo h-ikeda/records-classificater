@@ -123,10 +123,14 @@ interface VehicleIdentified extends Vehicle {
 
 const vehicles: Ref<VehicleIdentified[]> = ref([]);
 
-function setCurrentVehicle(vehicleId: string) {
-  updateDoc(doc(db, 'users', currentUser.value.uid), {
-    'state.vehicle': vehicleId,
-  });
+async function setCurrentVehicle(vehicleId: string) {
+  try {
+    await updateDoc(doc(db, 'users', currentUser.value.uid), {
+      'state.vehicle': vehicleId,
+    });
+  } catch (error) {
+    console.error('Failed to update current vehicle', error);
+  }
 }
 
 function share() {
