@@ -33,15 +33,35 @@ export default function VehicleSettings({
   // 対象車両の現在値を読み込み、フォームの初期値とする
   useEffect(() => {
     setLoaded(false);
-    if (!currentVehicleId) return;
-    const unsub = onSnapshot(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
-      const data = snapshot.data();
-      if (data) {
+    setError('');
+    if (!currentVehicleId) {
+      setName('');
+      setClasses([]);
+      return;
+    }
+    const unsub = onSnapshot(
+      doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
+      (snapshot) => {
+        const data = snapshot.data();
+        if (!data) {
+          setName('');
+          setClasses([]);
+          setError('車両情報が見つかりません');
+          setLoaded(true);
+          return;
+        }
         setName(data.name);
         setClasses(data.classes);
-      }
-      setLoaded(true);
-    });
+        setLoaded(true);
+      },
+      // 権限/通信エラー時もローダーを解除し、画面が固まらないようにする
+      () => {
+        setName('');
+        setClasses([]);
+        setError('車両情報の読み込みに失敗しました');
+        setLoaded(true);
+      },
+    );
     return unsub;
   }, [currentVehicleId]);
 

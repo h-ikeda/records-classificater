@@ -16,6 +16,11 @@ export default function App() {
     setCurrentUser(user);
   }), [auth]);
 
+  // ログアウト時に車両設定モーダルを閉じ、再ログイン時の意図しない再表示を防ぐ
+  useEffect(() => {
+    if (!currentUser) setVehicleSettingsOpen(false);
+  }, [currentUser]);
+
   if (currentUser === undefined) {
     return <Loader className="fixed inset-0 bg-slate-100 text-green-300 text-5xl" />;
   }
