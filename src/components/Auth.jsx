@@ -8,7 +8,7 @@ const local = process.env.NODE_ENV !== 'production';
 
 export default function Auth({ currentUser = null }) {
   return (
-    <nav className="flex gap-2 text-red-700">
+    <div className="flex gap-2 text-red-700">
       {local && currentUser && <DeleteAccount currentUser={currentUser} />}
       {currentUser ? (
         <SignOut />
@@ -17,6 +17,6 @@ export default function Auth({ currentUser = null }) {
       ) : (
         <SignInWithGoogle />
       )}
-    </nav>
+    </div>
   );
 }

@@ -14,6 +14,10 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
   const [dateTimeLocal, setDateTimeLocal] = useState(() => toLocalInputValue(new Date()));
 
   useEffect(() => {
+    setNewClass((prev) => (classOptions.includes(prev) ? prev : classOptions[0]));
+  }, [classOptions]);
+
+  useEffect(() => {
     setNewODO((odo) => (odo < minOdo ? minOdo : odo));
   }, [minOdo]);
 
@@ -25,6 +29,7 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
     event.preventDefault();
     const date = new Date(dateTimeLocal);
     if (isNaN(date.getTime())) return;
+    if (!newClass) return;
     if (typeof newODO !== 'number' || isNaN(newODO) || newODO < minOdo) return;
     onSubmit({
       timestamp: Timestamp.fromDate(date),

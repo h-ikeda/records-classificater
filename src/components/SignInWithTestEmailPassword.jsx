@@ -53,7 +53,7 @@ function signIn() {
 export default function SignInWithTestEmailPassword() {
   return (
     <button onClick={signIn}>
-      LogIn
+      Sign in
     </button>
   );
 }
