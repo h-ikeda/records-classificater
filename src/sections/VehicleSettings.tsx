@@ -17,8 +17,9 @@ export default function VehicleSettings({
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [name, setName] = useState('');
-  // 走行種別（business / private など）のマスタ
-  const [classes, setClasses] = useState<string[]>([]);
+  // 走行種別（business / private など）のマスタ。
+  // 削除・並び替え時に入力状態がずれないよう、各項目に安定した id を持たせる
+  const [classes, setClasses] = useState<{ id: string, value: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -51,7 +52,7 @@ export default function VehicleSettings({
           return;
         }
         setName(data.name);
-        setClasses(data.classes);
+        setClasses(data.classes.map((value) => ({ id: crypto.randomUUID(), value })));
         setLoaded(true);
       },
       // 権限/通信エラー時もローダーを解除し、画面が固まらないようにする
@@ -65,27 +66,30 @@ export default function VehicleSettings({
     return unsub;
   }, [currentVehicleId]);
 
-  function updateClass(index: number, value: string) {
-    setClasses((prev) => prev.map((c, i) => (i === index ? value : c)));
+  function updateClass(id: string, value: string) {
+    setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, value } : c)));
   }
 
-  function removeClass(index: number) {
-    setClasses((prev) => prev.filter((_, i) => i !== index));
+  function removeClass(id: string) {
+    setClasses((prev) => prev.filter((c) => c.id !== id));
   }
 
   function addClass() {
-    setClasses((prev) => [...prev, '']);
+    setClasses((prev) => [...prev, { id: crypto.randomUUID(), value: '' }]);
   }
 
   // 共有は権限の追加であり、フォームの保存とは独立してその場で反映する
-  function share() {
+  async function share() {
     if (!currentVehicleId) return;
     const id = prompt('共有相手のIDを入力してください');
-    if (id) {
-      updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
-        'permissions.read': arrayUnion(id),
-        'permissions.write': arrayUnion(id),
+    if (!id?.trim()) return;
+    try {
+      await updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
+        'permissions.read': arrayUnion(id.trim()),
+        'permissions.write': arrayUnion(id.trim()),
       });
+    } catch {
+      setError('共有の追加に失敗しました');
     }
   }
 
@@ -94,7 +98,7 @@ export default function VehicleSettings({
     if (!currentVehicleId) return;
     const trimmedName = name.trim();
     // 空欄を除き、前後の空白を整理する
-    const trimmedClasses = classes.map((c) => c.trim()).filter((c) => c !== '');
+    const trimmedClasses = classes.map((c) => c.value.trim()).filter((c) => c !== '');
     if (!trimmedName) {
       setError('車両名を入力してください');
       return;
@@ -153,11 +157,11 @@ export default function VehicleSettings({
             <div>
               <span className="text-xs font-medium text-gray-600">走行種別</span>
               <ul className="space-y-2 mt-1">
-                {classes.map((cls, index) => (
-                  <li key={index} className="flex items-center gap-2">
+                {classes.map((cls) => (
+                  <li key={cls.id} className="flex items-center gap-2">
                     <input
-                      value={cls}
-                      onChange={(e) => updateClass(index, e.target.value)}
+                      value={cls.value}
+                      onChange={(e) => updateClass(cls.id, e.target.value)}
                       type="text"
                       placeholder="例: business / private"
                       className="grow text-base border rounded-lg px-3 py-2 border-gray-300 focus:outline-none focus:border-lime-500"
@@ -165,7 +169,7 @@ export default function VehicleSettings({
                     <button
                       type="button"
                       aria-label="削除"
-                      onClick={() => removeClass(index)}
+                      onClick={() => removeClass(cls.id)}
                       className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 active:bg-gray-100"
                     >
                       ✕
