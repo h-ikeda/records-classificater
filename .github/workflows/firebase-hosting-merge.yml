@@ -20,3 +20,11 @@ jobs:
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
           channelId: live
           projectId: records-classificater
+      - name: Deploy Firestore rules
+        run: |
+          npm i -g firebase-tools
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          firebase deploy --only firestore:rules --project records-classificater
+        env:
+          FIREBASE_SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+          GOOGLE_APPLICATION_CREDENTIALS: '${{ runner.temp }}/firebase-service-account.json'

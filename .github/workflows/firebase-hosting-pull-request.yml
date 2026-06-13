@@ -18,6 +18,14 @@ jobs:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
           projectId: records-classificater-test
+      - name: Deploy Firestore rules
+        run: |
+          npm i -g firebase-tools
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          firebase deploy --only firestore:rules --project records-classificater-test
+        env:
+          FIREBASE_SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
+          GOOGLE_APPLICATION_CREDENTIALS: '${{ runner.temp }}/firebase-service-account.json'
   test:
     runs-on: ubuntu-latest
     steps:
