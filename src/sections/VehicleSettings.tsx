@@ -1,6 +1,6 @@
 import type { User } from 'firebase/auth';
 import { getFirestore, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { userConverter } from '../firestore/definitions/User';
 import { vehicleConverter } from '../firestore/definitions/Vehicle';
 import Loader from '../components/Loader';
@@ -22,6 +22,8 @@ export default function VehicleSettings({
   const [classes, setClasses] = useState<{ id: string, value: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // フォームへ初期値を反映済みかどうか。編集中の外部更新で入力が失われるのを防ぐ
+  const initialized = useRef(false);
 
   // 現在選択中の車両 ID を取得する
   useEffect(() => {
@@ -35,6 +37,7 @@ export default function VehicleSettings({
   useEffect(() => {
     setLoaded(false);
     setError('');
+    initialized.current = false;
     if (!currentVehicleId) {
       setName('');
       setClasses([]);
@@ -43,6 +46,9 @@ export default function VehicleSettings({
     const unsub = onSnapshot(
       doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
       (snapshot) => {
+        // 初回のみフォームへ反映する。共有操作などで snapshot が再発火しても
+        // 編集中の入力を上書きしないようにする
+        if (initialized.current) return;
         const data = snapshot.data();
         if (!data) {
           setName('');
@@ -51,6 +57,7 @@ export default function VehicleSettings({
           setLoaded(true);
           return;
         }
+        initialized.current = true;
         setName(data.name);
         setClasses(data.classes.map((value) => ({ id: crypto.randomUUID(), value })));
         setLoaded(true);
