@@ -19,8 +19,6 @@ interface VehicleIdentified extends Vehicle {
   id: string,
 }
 
-const db = getFirestore();
-
 // 分類ごとに色を割り当て、業務用と私用を一目で見分けられるようにする
 const classPalette = [
   'bg-blue-100 text-blue-800',
@@ -45,6 +43,8 @@ function formatNumber(number: number) {
 }
 
 export default function TripClassificater({ currentUser }: { currentUser: User }) {
+  // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
+  const db = getFirestore();
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
   const [vehicleClasses, setVehicleClasses] = useState<string[]>([]);
   const [currentYear, setCurrentYear] = useState(() => (new Date()).getFullYear());

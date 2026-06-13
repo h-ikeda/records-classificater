@@ -1,9 +1,9 @@
 import { createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, addDoc, Timestamp, collection } from 'firebase/firestore';
 
-const auth = getAuth();
-
 function signIn() {
+  // initializeApp 後に評価されるよう、Auth は呼び出し時に取得する
+  const auth = getAuth();
   signInWithEmailAndPassword(auth, 'abc@example.com', 'abcd1234').catch(async ({ code }) => {
     if (code !== 'auth/user-not-found') return;
     const { user } = await createUserWithEmailAndPassword(auth, 'abc@example.com', 'abcd1234');
