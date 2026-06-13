@@ -165,11 +165,8 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 一覧は新しい順に表示する（trip の差分計算は古い順のまま）
   const displayTrips = useMemo(() => [...calculatedTrips].reverse(), [calculatedTrips]);
 
-  const lastODO = useMemo(() => {
-    const last = trips.at(-1);
-    if (!last) return 0;
-    return last.odo;
-  }, [trips]);
+  // trips はスナップショット順で時系列とは限らないため、ODO（単調増加）の最大値を最新値とする
+  const lastODO = useMemo(() => trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [trips]);
 
   function classStyle(cls: string) {
     const i = vehicleClasses.indexOf(cls);
@@ -193,14 +190,16 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     }
   }
 
-  function createTrip(trip: Trip) {
+  // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
+  function createTrip(trip: Trip): string | null {
     const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
     const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.seconds < timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds < timestamp.nanoseconds);
-    if (prevTrip && trip.odo <= prevTrip.odo) return;
-    if (nextTrip && trip.odo >= nextTrip.odo) return;
-    if (!currentVehicleId) return;
+    if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
+    if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
+    if (!currentVehicleId) return '車両が選択されていません';
     addDoc(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
     setNewTripEnabled(false);
+    return null;
   }
 
   return (

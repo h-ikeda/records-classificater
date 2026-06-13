@@ -12,6 +12,7 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
   const [newClass, setNewClass] = useState(classOptions[0]);
   // 既定値は現在時刻。必要に応じて入力欄で調整する。
   const [dateTimeLocal, setDateTimeLocal] = useState(() => toLocalInputValue(new Date()));
+  const [error, setError] = useState('');
 
   useEffect(() => {
     setNewClass((prev) => (classOptions.includes(prev) ? prev : classOptions[0]));
@@ -28,14 +29,29 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
   function handleSubmit(event) {
     event.preventDefault();
     const date = new Date(dateTimeLocal);
-    if (isNaN(date.getTime())) return;
-    if (!newClass) return;
-    if (typeof newODO !== 'number' || isNaN(newODO) || newODO < minOdo) return;
-    onSubmit({
+    if (isNaN(date.getTime())) {
+      setError('記録日時が正しくありません');
+      return;
+    }
+    if (!newClass) {
+      setError('分類を選択してください');
+      return;
+    }
+    if (typeof newODO !== 'number' || isNaN(newODO)) {
+      setError('総走行距離 (ODO) を入力してください');
+      return;
+    }
+    if (newODO < minOdo) {
+      setError(`総走行距離 (ODO) は ${minOdo} km 以上で入力してください`);
+      return;
+    }
+    // onSubmit は却下時に理由（文字列）を返す。成功時は null。
+    const rejection = onSubmit({
       timestamp: Timestamp.fromDate(date),
       odo: newODO,
       class: newClass,
     });
+    if (rejection) setError(rejection);
   }
 
   return (
@@ -91,6 +107,9 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
           className="w-full text-base border rounded-lg px-3 py-2 mt-1 border-gray-300 focus:outline-none focus:border-lime-500"
         />
       </label>
+
+      {/* エラー表示 */}
+      {error && <p className="text-sm text-red-600 text-center" role="alert">{error}</p>}
 
       {/* 操作 */}
       <div className="flex gap-3">
