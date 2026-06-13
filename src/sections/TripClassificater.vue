@@ -5,6 +5,7 @@
       :vehicles="vehicles"
       :current-vehicle-id="currentVehicleId"
       @select="setCurrentVehicle"
+      @update-model="updateVehicleModel"
     />
     <button class="shrink-0 text-sm text-blue-700 py-2 px-2" @click="share">
       共有
@@ -130,6 +131,14 @@ async function setCurrentVehicle(vehicleId: string) {
     });
   } catch (error) {
     console.error('Failed to update current vehicle', error);
+  }
+}
+
+async function updateVehicleModel({ id, model }: { id: string, model: string }) {
+  try {
+    await updateDoc(doc(db, 'vehicles', id), { model });
+  } catch (error) {
+    console.error('Failed to update vehicle model', error);
   }
 }
 
