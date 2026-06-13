@@ -1,5 +1,5 @@
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore';
+import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
@@ -179,17 +179,6 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     });
   }
 
-  function share() {
-    if (!currentVehicleId) return;
-    const id = prompt('共有相手のIDを入力してください');
-    if (id) {
-      updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
-        'permissions.read': arrayUnion(id),
-        'permissions.write': arrayUnion(id),
-      });
-    }
-  }
-
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
   function createTrip(trip: Trip): string | null {
     const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
@@ -218,9 +207,6 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             ))}
           </select>
         </label>
-        <button className="shrink-0 text-sm text-blue-700 py-2 px-2" onClick={share}>
-          共有
-        </button>
       </section>
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}

@@ -1,5 +1,5 @@
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { getFirestore, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { userConverter } from '../firestore/definitions/User';
 import { vehicleConverter } from '../firestore/definitions/Vehicle';
@@ -75,6 +75,18 @@ export default function VehicleSettings({
 
   function addClass() {
     setClasses((prev) => [...prev, '']);
+  }
+
+  // 共有は権限の追加であり、フォームの保存とは独立してその場で反映する
+  function share() {
+    if (!currentVehicleId) return;
+    const id = prompt('共有相手のIDを入力してください');
+    if (id) {
+      updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
+        'permissions.read': arrayUnion(id),
+        'permissions.write': arrayUnion(id),
+      });
+    }
   }
 
   async function handleSave(event: React.FormEvent) {
@@ -167,6 +179,18 @@ export default function VehicleSettings({
                 className="mt-2 text-sm text-lime-700 font-medium active:text-lime-800"
               >
                 ＋ 走行種別を追加
+              </button>
+            </div>
+
+            {/* 共有 */}
+            <div>
+              <span className="text-xs font-medium text-gray-600">共有</span>
+              <button
+                type="button"
+                onClick={share}
+                className="mt-1 block text-sm text-blue-700 font-medium active:text-blue-800"
+              >
+                ＋ 共有相手を追加
               </button>
             </div>
 
