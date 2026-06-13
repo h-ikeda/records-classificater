@@ -11,7 +11,15 @@ let cache: Promise<Record<string, VehicleModelConfig>> | undefined;
 // 車種レジストリは dynamic import で別チャンクに分離し、必要になったときだけ読み込む。
 // 画像も registry.ts 経由でのみ参照されるため、初期バンドルには含まれない。
 export function loadVehicleModels(): Promise<Record<string, VehicleModelConfig>> {
-  if (!cache) cache = import('./registry').then(({ vehicleModels }) => vehicleModels);
+  if (!cache) {
+    cache = import('./registry')
+      .then(({ vehicleModels }) => vehicleModels)
+      .catch((error) => {
+        // 失敗した Promise をキャッシュに残すと再試行できなくなるためリセットする。
+        cache = undefined;
+        throw error;
+      });
+  }
   return cache;
 }
 
