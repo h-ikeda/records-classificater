@@ -1,10 +1,3 @@
-<template>
-  <button @click="signIn">
-    LogIn
-  </button>
-</template>
-
-<script setup>
 import { createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, addDoc, Timestamp, collection } from 'firebase/firestore';
 
@@ -56,4 +49,11 @@ function signIn() {
     });
   });
 }
-</script>
+
+export default function SignInWithTestEmailPassword() {
+  return (
+    <button onClick={signIn}>
+      LogIn
+    </button>
+  );
+}
