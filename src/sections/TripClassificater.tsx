@@ -38,6 +38,14 @@ function formatNumber(number: number) {
   return number.toFixed(6).replace(/\.?0*$/, '');
 }
 
+// drizzle は実際の DB エラーを cause に格納する（message はクエリ文のみ）。
+// 原因を診断できるよう cause まで取り出す。
+function formatError(e: unknown): string {
+  const err = e as { message?: string; cause?: { message?: string } };
+  if (err?.cause?.message) return `${err.message}\n原因: ${err.cause.message}`;
+  return err?.message ?? String(e);
+}
+
 export default function TripClassificater({ userId }: { userId: string }) {
   const { getToken } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -75,7 +83,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
         await refreshVehicles();
       } catch (e) {
         // 取得失敗時に無限ローダーにならないよう、原因を画面に出す
-        if (active) setLoadError((e as Error).message);
+        if (active) setLoadError(formatError(e));
       } finally {
         if (active) setLoading(false);
       }
@@ -146,7 +154,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
     try {
       await refreshVehicles();
     } catch (e) {
-      setLoadError((e as Error).message);
+      setLoadError(formatError(e));
     } finally {
       setLoading(false);
     }
@@ -160,7 +168,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
     try {
       await createVehicle(await token(), userId, name || '車両', ['業務', '私用']);
     } catch (e) {
-      alert(`車両の作成に失敗しました: ${(e as Error).message}`);
+      alert(`車両の作成に失敗しました: ${formatError(e)}`);
       return;
     }
     try {
@@ -182,7 +190,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
         await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
         await refreshTrips(currentVehicleId);
       } catch (e) {
-        alert(`記録の追加に失敗しました: ${(e as Error).message}`);
+        alert(`記録の追加に失敗しました: ${formatError(e)}`);
       }
     })();
     setNewTripEnabled(false);
