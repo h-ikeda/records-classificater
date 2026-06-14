@@ -1,0 +1,71 @@
+// Prisma schema for the records-classificater app on Vercel + Prisma Postgres.
+//
+// Multi-environment isolation: production and every Vercel preview deployment
+// share a single physical database but live in separate PostgreSQL schemas.
+// The active schema is selected through the `?schema=` parameter appended to
+// DATABASE_URL (see scripts/schema-name.mjs and src/lib/prisma.ts). Preview
+// schemas are created on deploy (scripts/prepare-db.mjs) and dropped when the
+// pull request closes (.github/workflows/preview-schema-cleanup.yml).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// A signed-in person. `id` is the Clerk user id (`user_...`).
+model User {
+  id               String   @id
+  // Currently selected vehicle for this user (UI state). Null until chosen.
+  currentVehicleId String?
+  currentVehicle   Vehicle? @relation("CurrentVehicle", fields: [currentVehicleId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Vehicle {
+  id         String          @id @default(cuid())
+  name       String
+  // Trip classes (e.g. "Business", "Private"). Order is meaningful (used for
+  // colour assignment in the UI), so this stays an ordered array.
+  classes    String[]
+  members    VehicleMember[]
+  trips      Trip[]
+  selectedBy User[]          @relation("CurrentVehicle")
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+}
+
+// Join table replacing Firestore's permissions.read / permissions.write arrays.
+// `userId` is a Clerk user id and is intentionally NOT a foreign key to User:
+// a vehicle can be shared with someone who has not signed in (and therefore has
+// no User row yet), mirroring the previous Firestore behaviour.
+model VehicleMember {
+  vehicleId String
+  userId    String
+  canRead   Boolean  @default(true)
+  canWrite  Boolean  @default(false)
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([vehicleId, userId])
+  @@index([userId])
+}
+
+model Trip {
+  id        String   @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  // Odometer reading in km. Monotonically increasing per vehicle over time.
+  odo       Float
+  class     String
+  timestamp DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleId])
+  @@index([vehicleId, timestamp])
+}

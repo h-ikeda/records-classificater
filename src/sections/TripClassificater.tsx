@@ -1,22 +1,13 @@
-import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
+'use client';
+
 import { useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
-import { tripConverter, type Trip } from '../firestore/definitions/Trip';
-import { userConverter } from '../firestore/definitions/User';
-import { tripsConverter } from '../firestore/definitions/Trips';
-import { Vehicle, vehicleConverter } from '../firestore/definitions/Vehicle';
+import { api, useSnapshot } from '@/lib/client';
+import type { TripDTO, TripInput } from '@/lib/types';
 
-interface TripIdentified extends Trip {
-  id: string,
-}
-
-interface TripCalculated extends TripIdentified {
-  trip: number,
-}
-
-interface VehicleIdentified extends Vehicle {
-  id: string,
+interface TripCalculated extends TripDTO {
+  date: Date;
+  trip: number;
 }
 
 // 分類ごとに色を割り当て、業務用と私用を一目で見分けられるようにする
@@ -29,135 +20,67 @@ const classPalette = [
   'bg-cyan-100 text-cyan-800',
 ];
 
-function sortByTimestamp({ timestamp: t1 }: Trip, { timestamp: t2 }: Trip) {
-  return (t1 as unknown as number) - (t2 as unknown as number);
-}
-
-function formatDate(timestamp: Timestamp) {
-  const d = timestamp.toDate();
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+function formatDate(date: Date) {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 }
 
 function formatNumber(number: number) {
   return number.toFixed(6).replace(/\.?0*$/, '');
 }
 
-export default function TripClassificater({ currentUser }: { currentUser: User }) {
-  // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
-  const db = getFirestore();
-  const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
-  const [vehicleClasses, setVehicleClasses] = useState<string[]>([]);
-  const [currentYear, setCurrentYear] = useState(() => (new Date()).getFullYear());
-  const [vehicles, setVehicles] = useState<VehicleIdentified[]>([]);
-  const [trips, setTrips] = useState<TripIdentified[]>([]);
+export default function TripClassificater() {
+  // null で購読開始 → サーバーが現在/先頭の車両を解決して snapshot.vehicleId で返す
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
   const [newTripEnabled, setNewTripEnabled] = useState(false);
 
-  useEffect(() => {
-    setVehicles([]);
-    const unsubUser = onSnapshot(doc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
-      if (!snapshot.exists()) {
-        const { data: oldTrips } = (await getDoc(doc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
-        const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
-          return acc.add(cls);
-        }, new Set<string>()));
-        const name = prompt('車の名称を入力してください');
-        const batch1 = writeBatch(db);
-        const newVehicle = doc(collection(db, 'vehicles')).withConverter(vehicleConverter);
-        await batch1
-          .set(newVehicle, {
-            classes,
-            name: name || '',
-            permissions: {
-              read: [currentUser.uid],
-              write: [currentUser.uid],
-            },
-          })
-          .set(doc(db, 'users', currentUser.uid).withConverter(userConverter), {
-            state: { vehicle: newVehicle.id },
-          })
-          .commit();
-        const batch2 = writeBatch(db);
-        oldTrips.forEach((trip) => {
-          batch2.set(doc(collection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
-        });
-        batch2.commit();
-        return;
-      }
-      setCurrentVehicleId(snapshot.data().state.vehicle);
-    });
-    const unsubVehicles = onSnapshot(query(collection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ doc, type }) => {
-        setVehicles((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => doc.id === id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
-        });
-      });
-    });
-    return () => {
-      unsubUser();
-      unsubVehicles();
-    };
-  }, [currentUser]);
+  const snapshot = useSnapshot(selectedVehicleId);
+  const vehicles = useMemo(() => snapshot?.vehicles ?? [], [snapshot]);
+  const effectiveVehicleId = snapshot?.vehicleId ?? null;
+  const trips = useMemo(() => snapshot?.trips ?? [], [snapshot]);
+  const vehicleClasses = useMemo(
+    () => vehicles.find((v) => v.id === effectiveVehicleId)?.classes ?? [],
+    [vehicles, effectiveVehicleId],
+  );
 
+  // サーバーが解決した車両を購読対象に同期し、以降の SSE をその車両に絞る
   useEffect(() => {
-    setTrips([]);
-    if (!currentVehicleId) return;
-    const unsubVehicle = onSnapshot(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
-      setVehicleClasses(snapshot.data()?.classes || []);
-    });
-    const unsubTrips = onSnapshot(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ type, doc }) => {
-        setTrips((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => id === doc.id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
-        });
-      });
-    });
-    return () => {
-      unsubVehicle();
-      unsubTrips();
-    };
-  }, [currentVehicleId]);
+    if (!selectedVehicleId && effectiveVehicleId) {
+      setSelectedVehicleId(effectiveVehicleId);
+    }
+  }, [selectedVehicleId, effectiveVehicleId]);
 
   const calculatedTrips = useMemo<TripCalculated[]>(() => {
-    const [first, ...remains] = [...trips].sort(sortByTimestamp);
+    const withDate = trips
+      .map((t) => ({ ...t, date: new Date(t.timestamp) }))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    const [first, ...remains] = withDate;
     if (!first) return [];
-    return remains.reduce(([acc, odo]: [TripCalculated[], number], trip: TripIdentified): [TripCalculated[], number] => {
-      acc.push({ ...trip, trip: trip.odo - odo });
-      return [acc, trip.odo];
-    }, [[{ ...first, trip: 0 }], first.odo] as [TripCalculated[], number])[0];
+    return remains.reduce(
+      ([acc, odo]: [TripCalculated[], number], trip): [TripCalculated[], number] => {
+        acc.push({ ...trip, trip: trip.odo - odo });
+        return [acc, trip.odo];
+      },
+      [[{ ...first, trip: 0 }], first.odo] as [TripCalculated[], number],
+    )[0];
   }, [trips]);
 
-  const classSummaries = useMemo(() => calculatedTrips.filter(({ timestamp }) => {
-    return timestamp.toDate().getFullYear() === currentYear;
-  }).reduce((acc, { class: c, trip }) => {
-    if (!(c in acc)) acc[c] = 0;
-    if (trip !== undefined) acc[c] += trip;
-    return acc;
-  }, {} as Record<string, number>), [calculatedTrips, currentYear]);
+  const classSummaries = useMemo(
+    () =>
+      calculatedTrips
+        .filter(({ date }) => date.getFullYear() === currentYear)
+        .reduce((acc, { class: c, trip }) => {
+          if (!(c in acc)) acc[c] = 0;
+          if (trip !== undefined) acc[c] += trip;
+          return acc;
+        }, {} as Record<string, number>),
+    [calculatedTrips, currentYear],
+  );
 
   const sum = useMemo(() => {
-    const last = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
-    let first = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear - 1);
-    if (!first) first = calculatedTrips.find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
+    const last = [...calculatedTrips].reverse().find(({ date }) => date.getFullYear() === currentYear);
+    let first = [...calculatedTrips].reverse().find(({ date }) => date.getFullYear() === currentYear - 1);
+    if (!first) first = calculatedTrips.find(({ date }) => date.getFullYear() === currentYear);
     if (!first || !last) return 0;
     return last.odo - first.odo;
   }, [calculatedTrips, currentYear]);
@@ -173,40 +96,66 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
   }
 
-  function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
-    updateDoc(doc(db, 'users', currentUser.uid), {
-      'state.vehicle': event.target.value,
-    });
+  async function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
+    const id = event.target.value;
+    setSelectedVehicleId(id);
+    try {
+      await api.setCurrentVehicle(id);
+    } catch {
+      /* 選択は SSE 再購読で反映されるため、失敗時もUIは破綻しない */
+    }
+  }
+
+  async function addVehicle() {
+    const name = window.prompt('車の名称を入力してください');
+    if (name === null) return;
+    try {
+      const vehicle = await api.createVehicle(name, []);
+      setSelectedVehicleId(vehicle.id);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '車両の追加に失敗しました');
+    }
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
-  function createTrip(trip: Trip): string | null {
-    const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
-    const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.seconds < timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds < timestamp.nanoseconds);
-    if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
-    if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
-    if (!currentVehicleId) return '車両が選択されていません';
-    addDoc(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
-    setNewTripEnabled(false);
-    return null;
+  async function createTrip(trip: TripInput): Promise<string | null> {
+    if (!effectiveVehicleId) return '車両が選択されていません';
+    try {
+      await api.createTrip(effectiveVehicleId, trip);
+      setNewTripEnabled(false);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : '記録の追加に失敗しました';
+    }
   }
 
   return (
     <>
       {/* 車両切り替え（利用頻度が高いので常に上部に固定） */}
       <section className="sticky top-0 z-20 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
-        <label className="flex items-center gap-2 grow min-w-0">
-          <span className="text-sm font-medium text-gray-500 shrink-0">車両</span>
-          <select
-            onChange={setCurrentVehicle}
-            value={currentVehicleId ?? ''}
-            className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
-          >
-            {vehicles.map(({ id, name }) => (
-              <option key={id} value={id}>{name}</option>
-            ))}
-          </select>
-        </label>
+        {vehicles.length ? (
+          <label className="flex items-center gap-2 grow min-w-0">
+            <span className="text-sm font-medium text-gray-500 shrink-0">車両</span>
+            <select
+              onChange={setCurrentVehicle}
+              value={effectiveVehicleId ?? ''}
+              className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
+            >
+              {vehicles.map(({ id, name }) => (
+                <option key={id} value={id}>{name}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="grow text-sm text-gray-500">車両がまだありません</p>
+        )}
+        <button
+          type="button"
+          onClick={addVehicle}
+          className="shrink-0 text-sm text-lime-700 font-medium active:text-lime-800"
+        >
+          ＋ 車両を追加
+        </button>
       </section>
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
@@ -239,13 +188,13 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
 
       {/* 走行記録一覧（新しい順） */}
       <ul className="space-y-3 pb-28">
-        {displayTrips.map(({ id, timestamp, odo, trip, class: cls }) => (
+        {displayTrips.map(({ id, date, odo, trip, class: cls }) => (
           <li
             key={id}
             className="rounded-xl border border-gray-200 bg-white shadow-sm p-4"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm text-gray-500 tabular-nums">{formatDate(timestamp)}</span>
+              <span className="text-sm text-gray-500 tabular-nums">{formatDate(date)}</span>
               <span className={`${classStyle(cls)} text-xs font-medium px-2.5 py-1 rounded-full`}>{cls}</span>
             </div>
             <div className="mt-3 flex items-end justify-between gap-4">
@@ -270,7 +219,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
       </ul>
 
       {/* 記録追加（主要操作なので画面下端に固定バーで常時表示） */}
-      {currentVehicleId && !newTripEnabled && (
+      {effectiveVehicleId && !newTripEnabled && (
         <div
           className="fixed inset-x-0 bottom-0 z-30 bg-white/80 backdrop-blur border-t border-gray-200 px-4 pt-4"
           style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}

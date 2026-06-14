@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Build (type-check + bundle)
+        run: npx next build
+        env:
+          # Build reads Clerk keys at runtime, but prerendering needs them present.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2ktcGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA==
+          CLERK_SECRET_KEY: sk_test_ci-build-placeholder
+          # No DATABASE_URL -> scripts/prepare-db.mjs skips DB provisioning.
+
+  migration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: records
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The Firestore emulator runs on the JVM.
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Run migration test (Firestore emulator -> Postgres)
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/records

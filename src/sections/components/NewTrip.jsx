@@ -1,4 +1,5 @@
-import { Timestamp } from 'firebase/firestore';
+'use client';
+
 import { useEffect, useRef, useState } from 'react';
 
 function toLocalInputValue(d) {
@@ -6,7 +7,7 @@ function toLocalInputValue(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCancel }) {
+export default function NewTrip({ minOdo = 0, classOptions = /** @type {string[]} */ ([]), onSubmit, onCancel }) {
   const odoInput = useRef(null);
   const [newODO, setNewODO] = useState(minOdo > 0 ? minOdo : 0);
   const [newClass, setNewClass] = useState(classOptions[0]);
@@ -26,7 +27,7 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
     odoInput.current?.focus();
   }, []);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const date = new Date(dateTimeLocal);
     if (isNaN(date.getTime())) {
@@ -46,8 +47,8 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
       return;
     }
     // onSubmit は却下時に理由（文字列）を返す。成功時は null。
-    const rejection = onSubmit({
-      timestamp: Timestamp.fromDate(date),
+    const rejection = await onSubmit({
+      timestamp: date.toISOString(),
       odo: newODO,
       class: newClass,
     });

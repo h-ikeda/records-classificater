@@ -1,0 +1,24 @@
+name: Cleanup preview schema
+
+# When a pull request closes its Vercel preview is torn down. Drop the matching
+# isolated PostgreSQL schema (created at build time by scripts/prepare-db.mjs) so
+# no orphaned preview data lingers in the shared database.
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  drop-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Drop preview schema for this branch
+        run: node scripts/drop-schema.mjs "${{ github.head_ref }}"
+        env:
+          # Direct Postgres connection to the shared Prisma Postgres database.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

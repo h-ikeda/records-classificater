@@ -64,6 +64,15 @@ node_modules/
 
 # dotenv environment variables file
 .env
+.env*.local
 
-/dist/
-/.parcel-cache
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+
+# Vercel
+.vercel
+
+# Prisma
+/prisma/migrations/dev.db*
