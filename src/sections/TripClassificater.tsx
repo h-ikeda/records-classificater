@@ -135,8 +135,12 @@ export default function TripClassificater({ userId }: { userId: string }) {
   async function handleCreateVehicle() {
     const name = prompt('車の名称を入力してください');
     if (name === null) return;
-    await createVehicle(await token(), userId, name || '車両', ['業務', '私用']);
-    await refreshVehicles();
+    try {
+      await createVehicle(await token(), userId, name || '車両', ['業務', '私用']);
+      await refreshVehicles();
+    } catch (e) {
+      alert(`車両の作成に失敗しました: ${(e as Error).message}`);
+    }
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
@@ -147,8 +151,12 @@ export default function TripClassificater({ userId }: { userId: string }) {
     if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
     if (!currentVehicleId) return '車両が選択されていません';
     (async () => {
-      await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
-      await refreshTrips(currentVehicleId);
+      try {
+        await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
+        await refreshTrips(currentVehicleId);
+      } catch (e) {
+        alert(`記録の追加に失敗しました: ${(e as Error).message}`);
+      }
     })();
     setNewTripEnabled(false);
     return null;
@@ -188,6 +196,15 @@ export default function TripClassificater({ userId }: { userId: string }) {
             ))}
           </select>
         </label>
+        {/* 常設の車両追加ボタン（車両が1台以上ある場合でも新規追加できるようにする） */}
+        <button
+          type="button"
+          onClick={handleCreateVehicle}
+          aria-label="車両を追加"
+          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-300 text-lime-700 text-2xl font-light active:bg-gray-100"
+        >
+          ＋
+        </button>
       </section>
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
