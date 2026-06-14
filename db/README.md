@@ -38,7 +38,7 @@ exactly what Vercel Postgres provisions. Pull it locally with:
 
 ```sh
 vercel env pull .env.local   # provides POSTGRES_URL
-export $(grep POSTGRES_URL .env.local)
+export POSTGRES_URL="$(grep '^POSTGRES_URL=' .env.local | cut -d '=' -f2-)"
 ```
 
 Then:

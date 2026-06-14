@@ -12,6 +12,10 @@ name: Database
       - 'db/**'
       - '.github/workflows/database.yml'
 
+# This workflow only reads the repository; deny everything else by default.
+permissions:
+  contents: read
+
 jobs:
   schema:
     name: Apply schema, seed and smoke tests
@@ -39,6 +43,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Apply schema
         run: psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/schema.sql

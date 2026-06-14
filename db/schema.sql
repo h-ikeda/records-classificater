@@ -78,5 +78,3 @@ CREATE TABLE trips (
   UNIQUE (vehicle_id, odo),
   UNIQUE (vehicle_id, recorded_at)
 );
-
-CREATE INDEX idx_trips_vehicle_recorded ON trips (vehicle_id, recorded_at);
