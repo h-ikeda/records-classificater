@@ -1,37 +1,36 @@
-import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { useEffect, useRef, useState } from 'react';
-import { userConverter } from '../firestore/definitions/User';
-import { vehicleConverter } from '../firestore/definitions/Vehicle';
+import { useAuth } from '@clerk/clerk-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getUserState, getVehicle, shareVehicle, updateVehicle } from '../db/queries';
 import Loader from '../components/Loader';
 
 export default function VehicleSettings({
-  currentUser,
+  userId,
   onClose,
 }: {
-  currentUser: User,
-  onClose: () => void,
+  userId: string;
+  onClose: () => void;
 }) {
-  // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
-  const db = getFirestore();
+  const { getToken } = useAuth();
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [name, setName] = useState('');
   // 走行種別（business / private など）のマスタ。
   // 削除・並び替え時に入力状態がずれないよう、各項目に安定した id を持たせる
-  const [classes, setClasses] = useState<{ id: string, value: string }[]>([]);
+  const [classes, setClasses] = useState<{ id: string; value: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  // フォームへ初期値を反映済みかどうか。編集中の外部更新で入力が失われるのを防ぐ
+  // フォームへ初期値を反映済みかどうか
   const initialized = useRef(false);
+
+  const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
 
   // 現在選択中の車両 ID を取得する
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
-      setCurrentVehicleId(snapshot.data()?.state.vehicle ?? null);
-    });
-    return unsub;
-  }, [currentUser]);
+    (async () => {
+      const state = await getUserState(await token(), userId);
+      setCurrentVehicleId(state?.vehicleId ?? null);
+    })();
+  }, [token, userId]);
 
   // 対象車両の現在値を読み込み、フォームの初期値とする
   useEffect(() => {
@@ -43,13 +42,11 @@ export default function VehicleSettings({
       setClasses([]);
       return;
     }
-    const unsub = onSnapshot(
-      doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
-      (snapshot) => {
-        // 初回のみフォームへ反映する。共有操作などで snapshot が再発火しても
-        // 編集中の入力を上書きしないようにする
-        if (initialized.current) return;
-        const data = snapshot.data();
+    let active = true;
+    (async () => {
+      try {
+        const data = await getVehicle(await token(), currentVehicleId);
+        if (!active || initialized.current) return;
         if (!data) {
           setName('');
           setClasses([]);
@@ -61,17 +58,18 @@ export default function VehicleSettings({
         setName(data.name);
         setClasses(data.classes.map((value) => ({ id: crypto.randomUUID(), value })));
         setLoaded(true);
-      },
-      // 権限/通信エラー時もローダーを解除し、画面が固まらないようにする
-      () => {
+      } catch {
+        if (!active) return;
         setName('');
         setClasses([]);
         setError('車両情報の読み込みに失敗しました');
         setLoaded(true);
-      },
-    );
-    return unsub;
-  }, [currentVehicleId]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [currentVehicleId, token]);
 
   function updateClass(id: string, value: string) {
     setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, value } : c)));
@@ -91,10 +89,7 @@ export default function VehicleSettings({
     const id = prompt('共有相手のIDを入力してください');
     if (!id?.trim()) return;
     try {
-      await updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
-        'permissions.read': arrayUnion(id.trim()),
-        'permissions.write': arrayUnion(id.trim()),
-      });
+      await shareVehicle(await token(), currentVehicleId, id.trim());
     } catch {
       setError('共有の追加に失敗しました');
     }
@@ -121,12 +116,12 @@ export default function VehicleSettings({
     setSaving(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
+      await updateVehicle(await token(), currentVehicleId, {
         name: trimmedName,
         classes: trimmedClasses,
       });
       onClose();
-    } catch (e) {
+    } catch {
       setError('保存に失敗しました');
       setSaving(false);
     }

@@ -1,17 +1,13 @@
-import type { User } from 'firebase/auth';
-import { getAuth, signOut } from 'firebase/auth';
+import { useClerk } from '@clerk/clerk-react';
 import { useEffect, useState } from 'react';
 import DeleteAccount from './DeleteAccount';
 
-const local = process.env.NODE_ENV !== 'production';
-
 export default function SettingsMenu({
-  currentUser,
   onOpenVehicleSettings,
 }: {
-  currentUser: User,
-  onOpenVehicleSettings: () => void,
+  onOpenVehicleSettings: () => void;
 }) {
+  const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
 
   // メニューを開いている間に Esc キーで閉じられるようにする
@@ -65,16 +61,14 @@ export default function SettingsMenu({
             <button
               type="button"
               role="menuitem"
-              onClick={() => signOut(getAuth())}
+              onClick={() => signOut()}
               className="w-full text-left px-4 py-2.5 text-sm text-red-700 active:bg-gray-100"
             >
               ログアウト
             </button>
-            {local && (
-              <div className="border-t border-gray-100 mt-1 pt-1 px-4 py-1.5 text-sm text-red-700">
-                <DeleteAccount currentUser={currentUser} />
-              </div>
-            )}
+            <div className="border-t border-gray-100 mt-1 pt-1 px-4 py-1.5 text-sm text-red-700">
+              <DeleteAccount />
+            </div>
           </div>
         </>
       )}

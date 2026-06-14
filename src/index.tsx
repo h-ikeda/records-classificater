@@ -1,16 +1,12 @@
-import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth } from 'firebase/auth';
-import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
+import { ClerkProvider } from '@clerk/clerk-react';
 import { createRoot } from 'react-dom/client';
-import config from './firebase';
 import App from './App';
 
-initializeApp(config);
-
-if (process.env.NODE_ENV !== 'production') {
-  connectAuthEmulator(getAuth(), 'http://localhost:9099');
-  connectFirestoreEmulator(getFirestore(), 'localhost', 8080);
-}
+const publishableKey = process.env.CLERK_PUBLISHABLE_KEY ?? '';
 
 const container = document.getElementById('root')!;
-createRoot(container).render(<App />);
+createRoot(container).render(
+  <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+    <App />
+  </ClerkProvider>,
+);

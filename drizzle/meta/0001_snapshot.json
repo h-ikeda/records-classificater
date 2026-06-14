@@ -1,0 +1,381 @@
+{
+  "id": "b39610d3-f6b6-4780-9ccf-179baa209206",
+  "prevId": "e0378aa8-a0b5-4671-aa04-57d34fadae35",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.trips": {
+      "name": "trips",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "vehicle_id": {
+          "name": "vehicle_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "odo": {
+          "name": "odo",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "class": {
+          "name": "class",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timestamp": {
+          "name": "timestamp",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "trips_vehicle_id_vehicles_id_fk": {
+          "name": "trips_vehicle_id_vehicles_id_fk",
+          "tableFrom": "trips",
+          "tableTo": "vehicles",
+          "columnsFrom": [
+            "vehicle_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "trips_select": {
+          "name": "trips_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_read_vehicle(\"trips\".\"vehicle_id\")"
+        },
+        "trips_insert": {
+          "name": "trips_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "authenticated"
+          ],
+          "withCheck": "public.can_write_vehicle(\"trips\".\"vehicle_id\") and exists (\n        select 1 from vehicles v\n        where v.id = \"trips\".\"vehicle_id\"\n          and \"trips\".\"class\" = any(v.classes)\n      )"
+        },
+        "trips_update": {
+          "name": "trips_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_write_vehicle(\"trips\".\"vehicle_id\")"
+        },
+        "trips_delete": {
+          "name": "trips_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_write_vehicle(\"trips\".\"vehicle_id\")"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_states": {
+      "name": "user_states",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "vehicle_id": {
+          "name": "vehicle_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_states_vehicle_id_vehicles_id_fk": {
+          "name": "user_states_vehicle_id_vehicles_id_fk",
+          "tableFrom": "user_states",
+          "tableTo": "vehicles",
+          "columnsFrom": [
+            "vehicle_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "crud-authenticated-policy-select": {
+          "name": "crud-authenticated-policy-select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "authenticated"
+          ],
+          "using": "(select auth.user_id() = \"user_states\".\"user_id\")"
+        },
+        "crud-authenticated-policy-insert": {
+          "name": "crud-authenticated-policy-insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "authenticated"
+          ],
+          "withCheck": "(select auth.user_id() = \"user_states\".\"user_id\")"
+        },
+        "crud-authenticated-policy-update": {
+          "name": "crud-authenticated-policy-update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "(select auth.user_id() = \"user_states\".\"user_id\")",
+          "withCheck": "(select auth.user_id() = \"user_states\".\"user_id\")"
+        },
+        "crud-authenticated-policy-delete": {
+          "name": "crud-authenticated-policy-delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "(select auth.user_id() = \"user_states\".\"user_id\")"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.vehicle_members": {
+      "name": "vehicle_members",
+      "schema": "",
+      "columns": {
+        "vehicle_id": {
+          "name": "vehicle_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "can_read": {
+          "name": "can_read",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "can_write": {
+          "name": "can_write",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "vehicle_members_vehicle_id_vehicles_id_fk": {
+          "name": "vehicle_members_vehicle_id_vehicles_id_fk",
+          "tableFrom": "vehicle_members",
+          "tableTo": "vehicles",
+          "columnsFrom": [
+            "vehicle_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "vehicle_members_vehicle_id_user_id_pk": {
+          "name": "vehicle_members_vehicle_id_user_id_pk",
+          "columns": [
+            "vehicle_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {
+        "vehicle_members_select": {
+          "name": "vehicle_members_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "authenticated"
+          ],
+          "using": "\"vehicle_members\".\"user_id\" = (select auth.user_id())"
+        },
+        "vehicle_members_insert": {
+          "name": "vehicle_members_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "authenticated"
+          ],
+          "withCheck": "\"vehicle_members\".\"user_id\" = (select auth.user_id()) or public.can_write_vehicle(\"vehicle_members\".\"vehicle_id\")"
+        },
+        "vehicle_members_update": {
+          "name": "vehicle_members_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_write_vehicle(\"vehicle_members\".\"vehicle_id\")"
+        },
+        "vehicle_members_delete": {
+          "name": "vehicle_members_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "\"vehicle_members\".\"user_id\" = (select auth.user_id()) or public.can_write_vehicle(\"vehicle_members\".\"vehicle_id\")"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.vehicles": {
+      "name": "vehicles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "classes": {
+          "name": "classes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "vehicles_select": {
+          "name": "vehicles_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_read_vehicle(\"vehicles\".\"id\")"
+        },
+        "vehicles_insert": {
+          "name": "vehicles_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "authenticated"
+          ],
+          "withCheck": "true"
+        },
+        "vehicles_update": {
+          "name": "vehicles_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_write_vehicle(\"vehicles\".\"id\")",
+          "withCheck": "public.can_write_vehicle(\"vehicles\".\"id\")"
+        },
+        "vehicles_delete": {
+          "name": "vehicles_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "authenticated"
+          ],
+          "using": "public.can_write_vehicle(\"vehicles\".\"id\")"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
