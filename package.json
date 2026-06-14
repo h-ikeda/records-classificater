@@ -28,6 +28,7 @@
   "scripts": {
     "start": "parcel",
     "build": "parcel build",
+    "vercel-build": "node scripts/vercel-build.mjs",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

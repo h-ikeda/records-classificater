@@ -81,15 +81,23 @@ DATABASE_URL=<owner-url> FIREBASE_SERVICE_ACCOUNT='<json>' npm run migrate:fires
 
 ## デプロイ（Vercel）
 
-- `vercel.json` でビルドコマンド・出力ディレクトリ・SPA リライトを定義。
-- 環境変数 `CLERK_PUBLISHABLE_KEY` と `DATABASE_AUTHENTICATED_URL` を Vercel に設定する。
+Neon・Clerk は **Vercel のネイティブ統合**でリンクする前提。環境変数とプレビュー DB は統合が自動で用意する:
 
-### PR ごとのプレビュー DB（Neon ブランチング）
+- **Neon 統合**: プレビュー（PR）ごとに Neon ブランチを自動作成し、`DATABASE_URL` /
+  `DATABASE_URL_UNPOOLED` を各環境（本番・プレビュー）へ自動注入。git ブランチの
+  マージ／削除時に Neon ブランチも自動削除。→ **専用の GitHub Actions は不要**。
+- **Clerk 統合**: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` を自動注入。
 
-`.github/workflows/neon-preview.yml` が PR ごとに Neon DB をブランチングする:
+統合が面倒を見ない 2 点だけをビルド (`scripts/vercel-build.mjs`) で補う:
 
-- PR open/更新時: `preview/pr-<番号>` ブランチを作成し、マイグレーションとシードを適用。
-- PR close 時: ブランチを削除。
+1. その環境の Neon ブランチへ **マイグレーションを適用**（注入された `DATABASE_URL` を使用）。
+2. ブラウザ用に **`authenticated` ロール（パスワードレス）の接続文字列を `DATABASE_URL` から導出**して
+   バンドルへ埋め込む（所有者の `DATABASE_URL` はバンドルに含めない）。
+   ホストがプレビューごとに変わるため、毎ビルドで導出する。明示的に
+   `DATABASE_AUTHENTICATED_URL` を設定した場合はそちらを優先。
 
-必要な Secrets: `NEON_API_KEY`, `NEON_PROJECT_ID`（任意の変数 `SEED_USER_ID`）。
-Vercel プレビューには当該ブランチの `authenticated` 接続文字列を渡す（Neon の Vercel インテグレーション利用時は自動）。
+`vercel.json` がビルドコマンド (`npm run vercel-build`)・出力 (`dist`)・SPA リライトを定義する。
+
+前提: Neon プロジェクトで **Neon Authorize（RLS）を有効化**し、Clerk を JWT プロバイダとして
+登録しておくこと（`authenticated` ロールと `auth.user_id()` がプロジェクト全体に用意される）。
+プレビューブランチは親（本番）からのコピーなのでシードは不要。
