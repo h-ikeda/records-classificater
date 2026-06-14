@@ -46,6 +46,18 @@ function formatError(e: unknown): string {
   return err?.message ?? String(e);
 }
 
+// 診断用: JWT を検証せずにペイロードだけ復号し、発行元などを確認する。
+// Neon に登録した JWKS の発行元(iss)と突き合わせるために使う。
+function decodeJwt(token: string): Record<string, unknown> | null {
+  try {
+    const payload = token.split('.')[1];
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 export default function TripClassificater({ userId }: { userId: string }) {
   const { getToken } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -55,8 +67,22 @@ export default function TripClassificater({ userId }: { userId: string }) {
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [tokenInfo, setTokenInfo] = useState<string | null>(null);
 
   const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
+
+  // 診断用: 取得した JWT の発行元(iss)/sub/azp を表示用に保持する。
+  useEffect(() => {
+    (async () => {
+      const t = await token();
+      const claims = t ? decodeJwt(t) : null;
+      setTokenInfo(
+        claims
+          ? `iss=${claims.iss ?? '(なし)'} / sub=${claims.sub ?? '(なし)'} / azp=${claims.azp ?? '(なし)'}`
+          : 'JWT を取得できませんでした',
+      );
+    })();
+  }, [token]);
 
   const refreshVehicles = useCallback(async () => {
     const t = await token();
@@ -207,6 +233,12 @@ export default function TripClassificater({ userId }: { userId: string }) {
         <p className="text-red-700 font-bold">読み込みエラー</p>
         <p>データの取得に失敗しました。Neon の RLS 設定や接続を確認してください。</p>
         <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-red-800">{loadError}</pre>
+        {tokenInfo && (
+          <div>
+            <p className="text-xs text-gray-500">JWT 診断（Neon に登録した JWKS の発行元と一致するか確認）:</p>
+            <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-gray-700">{tokenInfo}</pre>
+          </div>
+        )}
         <button
           onClick={retryLoad}
           className="bg-lime-500 text-white rounded-xl py-2 px-5 font-bold shadow active:bg-lime-600"
