@@ -46,6 +46,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
 
@@ -69,8 +70,15 @@ export default function TripClassificater({ userId }: { userId: string }) {
     let active = true;
     (async () => {
       setLoading(true);
-      await refreshVehicles();
-      if (active) setLoading(false);
+      setLoadError(null);
+      try {
+        await refreshVehicles();
+      } catch (e) {
+        // 取得失敗時に無限ローダーにならないよう、原因を画面に出す
+        if (active) setLoadError((e as Error).message);
+      } finally {
+        if (active) setLoading(false);
+      }
     })();
     return () => {
       active = false;
@@ -132,14 +140,33 @@ export default function TripClassificater({ userId }: { userId: string }) {
     await setCurrentVehicleQuery(await token(), userId, id);
   }
 
+  async function retryLoad() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      await refreshVehicles();
+    } catch (e) {
+      setLoadError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleCreateVehicle() {
     const name = prompt('車の名称を入力してください');
     if (name === null) return;
+    // 作成と一覧更新は分けて扱う。作成成功後に更新だけ失敗した場合、
+    // 「作成失敗」と誤表示して再試行＝重複作成を招かないようにする。
     try {
       await createVehicle(await token(), userId, name || '車両', ['業務', '私用']);
-      await refreshVehicles();
     } catch (e) {
       alert(`車両の作成に失敗しました: ${(e as Error).message}`);
+      return;
+    }
+    try {
+      await refreshVehicles();
+    } catch {
+      alert('車両は作成されましたが、一覧の更新に失敗しました。再読み込みしてください。');
     }
   }
 
@@ -164,6 +191,22 @@ export default function TripClassificater({ userId }: { userId: string }) {
 
   if (loading) {
     return <Loader className="text-lime-500 text-4xl py-16" />;
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-6 text-sm text-gray-800 space-y-3">
+        <p className="text-red-700 font-bold">読み込みエラー</p>
+        <p>データの取得に失敗しました。Neon の RLS 設定や接続を確認してください。</p>
+        <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-red-800">{loadError}</pre>
+        <button
+          onClick={retryLoad}
+          className="bg-lime-500 text-white rounded-xl py-2 px-5 font-bold shadow active:bg-lime-600"
+        >
+          再試行
+        </button>
+      </div>
+    );
   }
 
   if (!vehicles.length) {
