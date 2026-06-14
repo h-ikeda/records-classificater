@@ -32,11 +32,24 @@ test/                   移行テスト（エミュレータ→pglite）と RLS 
 
 ## セットアップ
 
+> [!IMPORTANT]
+> **デプロイ前に Neon Authorize（Neon RLS）の有効化が必須。**
+> 有効化しないと `authenticated` ロールと `auth.user_id()` が存在せず、マイグレーション
+> （`GRANT ... TO authenticated` や RLS ポリシー作成）が `role "authenticated" does not exist`
+> で失敗する。これらは Neon が管理するため、マイグレーションでは作成しない。
+
 1. `.env.example` を `.env` にコピーして値を設定する。
-2. Neon プロジェクトで **Neon Authorize（RLS）** を有効化し、Clerk を JWT プロバイダ（JWKS）として登録する。
-   これにより `authenticated` ロールと `auth.user_id()` が用意される。
+2. Neon プロジェクトで **Neon Authorize（RLS）** を有効化し、Clerk を JWT プロバイダ（JWKS URL）として登録する。
+   - Neon コンソール → 対象プロジェクト → Settings → Authorize で Clerk を追加。
+   - これにより `authenticated` ロールと `auth.user_id()` がプロジェクトに用意される。
 3. マイグレーションを適用: `npm run db:migrate`
 4. （任意）サンプルデータ投入: `npm run db:seed`
+
+> [!NOTE]
+> Authorize を有効化する前に作成済みのプレビューブランチには、`authenticated` ロールが
+> 含まれていない（ブランチ作成時点の親の状態をコピーするため）。その場合は Neon で当該
+> `preview/...` ブランチを削除し、再デプロイすると Authorize 済みの親から作り直される。
+> ビルド (`scripts/vercel-build.mjs`) はこの状態を検知して、分かりやすいメッセージで停止する。
 
 ## 開発
 
