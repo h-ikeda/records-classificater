@@ -15,7 +15,7 @@ async function main() {
   const db = drizzle(neon(url));
   const { vehicle, member, trips: tripRows } = sampleData(userId);
 
-  console.log(`Seeding sample data for user "${userId}"...`);
+  console.log('Seeding sample data...');
   await db.insert(vehicles).values(vehicle).onConflictDoNothing();
   await db.insert(vehicleMembers).values(member).onConflictDoNothing();
   await db.insert(trips).values(tripRows.map((t) => ({ ...t, vehicleId: vehicle.id })));
