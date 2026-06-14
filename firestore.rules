@@ -37,6 +37,15 @@ service cloud.firestore {
         && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
       allow list, get: if request.auth != null
         && request.auth.uid in resource.data.permissions.read;
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.permissions.write
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'classes', 'permissions'])
+        && request.resource.data.classes is list
+        && request.resource.data.name is string
+        && request.resource.data.permissions is map
+        && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
+        && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
+        && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
 
       match /trips/{tid} {
         allow get, list: if request.auth != null
