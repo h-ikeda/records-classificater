@@ -1,0 +1,62 @@
+name: Database
+
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - 'db/**'
+      - '.github/workflows/database.yml'
+  pull_request:
+    paths:
+      - 'db/**'
+      - '.github/workflows/database.yml'
+
+# This workflow only reads the repository; deny everything else by default.
+permissions:
+  contents: read
+
+jobs:
+  schema:
+    name: Apply schema, seed and smoke tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: records_classificater_test
+        ports:
+          - 5432:5432
+        # Wait until Postgres is ready before the job starts using it.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Mirrors the connection string Vercel Postgres exposes as POSTGRES_URL.
+      POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/records_classificater_test
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Apply schema
+        run: psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
+
+      - name: Load seed data
+        run: psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/seed.sql
+
+      - name: Run smoke tests
+        run: psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/test/smoke.sql
+
+      - name: Verify reset + re-apply is repeatable
+        run: |
+          psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/reset.sql
+          psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/schema.sql
+          psql "$POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/seed.sql

@@ -24,7 +24,11 @@
     "build": "parcel build",
     "deploy:rules": "firebase deploy --only firestore:rules",
     "deploy:rules:prod": "firebase --project records-classificater deploy --only firestore:rules",
-    "test": "firebase emulators:exec jest"
+    "test": "firebase emulators:exec jest",
+    "db:schema": "psql \"$POSTGRES_URL\" -v ON_ERROR_STOP=1 -f db/schema.sql",
+    "db:seed": "psql \"$POSTGRES_URL\" -v ON_ERROR_STOP=1 -f db/seed.sql",
+    "db:reset": "psql \"$POSTGRES_URL\" -v ON_ERROR_STOP=1 -f db/reset.sql -f db/schema.sql -f db/seed.sql",
+    "db:test": "psql \"$POSTGRES_URL\" -v ON_ERROR_STOP=1 -f db/schema.sql -f db/seed.sql -f db/test/smoke.sql"
   },
   "source": "src/index.html"
 }
