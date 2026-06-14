@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { eq } from 'drizzle-orm';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
 import { trips, userStates, vehicleMembers, vehicles } from '../src/db/schema';
@@ -19,9 +18,9 @@ async function main() {
   console.log('Seeding sample data...');
   await db.insert(vehicles).values(vehicle).onConflictDoNothing();
   await db.insert(vehicleMembers).values(member).onConflictDoNothing();
-  // 再実行で trips が重複蓄積しないよう、サンプル車両の既存 trip を先に削除して冪等にする
-  await db.delete(trips).where(eq(trips.vehicleId, vehicle.id));
-  await db.insert(trips).values(tripRows.map((t) => ({ ...t, vehicleId: vehicle.id })));
+  // trips は決定的な id を持つため、onConflictDoNothing で 1 文・冪等・原子的に投入できる
+  // （neon-http はトランザクション非対応。delete→insert の非原子的な手順を避ける）
+  await db.insert(trips).values(tripRows.map((t) => ({ ...t, vehicleId: vehicle.id }))).onConflictDoNothing();
   await db
     .insert(userStates)
     .values({ userId, vehicleId: vehicle.id })
