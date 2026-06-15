@@ -29,6 +29,13 @@
       "when": 1781494721685,
       "tag": "0003_secdef_search_path",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781495949910,
+      "tag": "0004_secdef_harden",
+      "breakpoints": true
     }
   ]
 }
