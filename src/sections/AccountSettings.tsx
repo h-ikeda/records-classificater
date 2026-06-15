@@ -1,4 +1,5 @@
 import { useClerk, useUser } from '@clerk/clerk-react';
+import { useEffect } from 'react';
 import DeleteAccount from '../components/DeleteAccount';
 
 export default function AccountSettings({ onClose }: { onClose: () => void }) {
@@ -7,16 +8,30 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
   const displayName =
     user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'ユーザー';
 
+  // Esc キーでモーダルを閉じられるようにする
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-40 flex items-start bg-black/40"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="account-settings-title"
     >
       <div
         className="w-full bg-white rounded-b-2xl px-5 pb-5 max-h-full overflow-y-auto shadow-2xl"
         style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}
       >
-        <h3 className="text-base font-bold text-center py-1">アカウント設定</h3>
+        <h3 id="account-settings-title" className="text-base font-bold text-center py-1">
+          アカウント設定
+        </h3>
 
         {/* サインイン中のユーザー情報（Google ログイン: アバターと表示名） */}
         {user && (
@@ -26,6 +41,10 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
                 src={user.imageUrl}
                 alt=""
                 className="w-12 h-12 rounded-full shrink-0 object-cover"
+                onError={(e) => {
+                  // 画像が読み込めないときは壊れたアイコンを出さず非表示にする
+                  e.currentTarget.style.display = 'none';
+                }}
               />
             )}
             <div className="min-w-0">
