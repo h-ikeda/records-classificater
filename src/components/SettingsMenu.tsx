@@ -1,13 +1,12 @@
-import { useClerk } from '@clerk/clerk-react';
 import { useEffect, useState } from 'react';
-import DeleteAccount from './DeleteAccount';
 
 export default function SettingsMenu({
   onOpenVehicleSettings,
+  onOpenAccountSettings,
 }: {
   onOpenVehicleSettings: () => void;
+  onOpenAccountSettings: () => void;
 }) {
-  const { signOut } = useClerk();
   const [open, setOpen] = useState(false);
 
   // メニューを開いている間に Esc キーで閉じられるようにする
@@ -20,9 +19,9 @@ export default function SettingsMenu({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  function handleVehicleSettings() {
+  function handle(open: () => void) {
     setOpen(false);
-    onOpenVehicleSettings();
+    open();
   }
 
   return (
@@ -53,7 +52,7 @@ export default function SettingsMenu({
             <button
               type="button"
               role="menuitem"
-              onClick={handleVehicleSettings}
+              onClick={() => handle(onOpenVehicleSettings)}
               className="w-full text-left px-4 py-2.5 text-sm active:bg-gray-100"
             >
               車両設定
@@ -61,14 +60,11 @@ export default function SettingsMenu({
             <button
               type="button"
               role="menuitem"
-              onClick={() => signOut()}
-              className="w-full text-left px-4 py-2.5 text-sm text-red-700 active:bg-gray-100"
+              onClick={() => handle(onOpenAccountSettings)}
+              className="w-full text-left px-4 py-2.5 text-sm active:bg-gray-100"
             >
-              ログアウト
+              アカウント設定
             </button>
-            <div className="border-t border-gray-100 mt-1 pt-1 px-4 py-1.5 text-sm text-red-700">
-              <DeleteAccount />
-            </div>
           </div>
         </>
       )}

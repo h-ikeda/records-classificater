@@ -1,75 +1,95 @@
 import { useAuth } from '@clerk/clerk-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getUserState, getVehicle, shareVehicle, updateVehicle } from '../db/queries';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  createVehicle,
+  getUserState,
+  listVehicles,
+  shareVehicle,
+  updateVehicle,
+} from '../db/queries';
+import type { Vehicle } from '../db/schema';
 import Loader from '../components/Loader';
 
 export default function VehicleSettings({
   userId,
+  onChanged,
   onClose,
 }: {
   userId: string;
+  // 車両の追加・更新時に呼び、走行記録画面側を再取得させる
+  onChanged: () => void;
   onClose: () => void;
 }) {
   const { getToken } = useAuth();
-  const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
-  // 走行種別（business / private など）のマスタ。
-  // 削除・並び替え時に入力状態がずれないよう、各項目に安定した id を持たせる
+  // 走行種別マスタ。各項目に安定した id を持たせて編集中のずれを防ぐ
   const [classes, setClasses] = useState<{ id: string; value: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  // フォームへ初期値を反映済みかどうか
-  const initialized = useRef(false);
 
   const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
 
-  // 現在選択中の車両 ID を取得する
-  useEffect(() => {
-    (async () => {
-      const state = await getUserState(await token(), userId);
-      setCurrentVehicleId(state?.vehicleId ?? null);
-    })();
-  }, [token, userId]);
+  // 指定した車両の値をフォームへ反映する
+  const populate = useCallback((list: Vehicle[], id: string | null) => {
+    const v = list.find((x) => x.id === id);
+    setName(v?.name ?? '');
+    setClasses((v?.classes ?? []).map((value) => ({ id: crypto.randomUUID(), value })));
+  }, []);
 
-  // 対象車両の現在値を読み込み、フォームの初期値とする
+  // 車両一覧と現在選択中の車両を読み込む
   useEffect(() => {
-    setLoaded(false);
-    setError('');
-    initialized.current = false;
-    if (!currentVehicleId) {
-      setName('');
-      setClasses([]);
-      return;
-    }
     let active = true;
     (async () => {
+      setLoading(true);
+      setError('');
       try {
-        const data = await getVehicle(await token(), currentVehicleId);
-        if (!active || initialized.current) return;
-        if (!data) {
-          setName('');
-          setClasses([]);
-          setError('車両情報が見つかりません');
-          setLoaded(true);
-          return;
-        }
-        initialized.current = true;
-        setName(data.name);
-        setClasses(data.classes.map((value) => ({ id: crypto.randomUUID(), value })));
-        setLoaded(true);
-      } catch {
+        const t = await token();
+        const [state, list] = await Promise.all([getUserState(t, userId), listVehicles(t)]);
         if (!active) return;
-        setName('');
-        setClasses([]);
-        setError('車両情報の読み込みに失敗しました');
-        setLoaded(true);
+        const sel =
+          state?.vehicleId && list.some((v) => v.id === state.vehicleId)
+            ? state.vehicleId
+            : list[0]?.id ?? null;
+        setVehicles(list);
+        setSelectedId(sel);
+        populate(list, sel);
+      } catch {
+        if (active) setError('車両情報の読み込みに失敗しました');
+      } finally {
+        if (active) setLoading(false);
       }
     })();
     return () => {
       active = false;
     };
-  }, [currentVehicleId, token]);
+  }, [token, userId, populate]);
+
+  function handleSelect(event: React.ChangeEvent<HTMLSelectElement>) {
+    const id = event.target.value;
+    setSelectedId(id);
+    setError('');
+    populate(vehicles, id);
+  }
+
+  async function handleAddVehicle() {
+    const inputName = prompt('車の名称を入力してください');
+    if (inputName === null) return;
+    try {
+      const id = await createVehicle(await token(), userId, inputName || '車両', ['業務', '私用']);
+      const t = await token();
+      const list = await listVehicles(t);
+      setVehicles(list);
+      setSelectedId(id);
+      populate(list, id);
+      setError('');
+      onChanged();
+    } catch (e) {
+      setError(`車両の追加に失敗しました: ${(e as Error).message}`);
+    }
+  }
 
   function updateClass(id: string, value: string) {
     setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, value } : c)));
@@ -83,13 +103,12 @@ export default function VehicleSettings({
     setClasses((prev) => [...prev, { id: crypto.randomUUID(), value: '' }]);
   }
 
-  // 共有は権限の追加であり、フォームの保存とは独立してその場で反映する
   async function share() {
-    if (!currentVehicleId) return;
+    if (!selectedId) return;
     const id = prompt('共有相手のIDを入力してください');
     if (!id?.trim()) return;
     try {
-      await shareVehicle(await token(), currentVehicleId, id.trim());
+      await shareVehicle(await token(), selectedId, id.trim());
     } catch {
       setError('共有の追加に失敗しました');
     }
@@ -97,9 +116,8 @@ export default function VehicleSettings({
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();
-    if (!currentVehicleId) return;
+    if (!selectedId) return;
     const trimmedName = name.trim();
-    // 空欄を除き、前後の空白を整理する
     const trimmedClasses = classes.map((c) => c.value.trim()).filter((c) => c !== '');
     if (!trimmedName) {
       setError('車両名を入力してください');
@@ -116,10 +134,8 @@ export default function VehicleSettings({
     setSaving(true);
     setError('');
     try {
-      await updateVehicle(await token(), currentVehicleId, {
-        name: trimmedName,
-        classes: trimmedClasses,
-      });
+      await updateVehicle(await token(), selectedId, { name: trimmedName, classes: trimmedClasses });
+      onChanged();
       onClose();
     } catch {
       setError('保存に失敗しました');
@@ -138,89 +154,133 @@ export default function VehicleSettings({
       >
         <h3 className="text-base font-bold text-center py-1">車両設定</h3>
 
-        {!currentVehicleId ? (
-          <p className="text-center text-sm text-gray-500 py-8">車両が選択されていません</p>
-        ) : !loaded ? (
+        {loading ? (
           <Loader className="text-lime-500 text-3xl py-8" />
         ) : (
-          <form className="space-y-5" onSubmit={handleSave}>
-            {/* 車両名 */}
-            <label className="block">
-              <span className="text-xs font-medium text-gray-600">車両名</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                type="text"
-                className="w-full text-lg font-medium border-b-2 border-lime-500 bg-transparent focus:outline-none py-1"
-              />
-            </label>
-
-            {/* 走行種別マスタ */}
-            <div>
-              <span className="text-xs font-medium text-gray-600">走行種別</span>
-              <ul className="space-y-2 mt-1">
-                {classes.map((cls) => (
-                  <li key={cls.id} className="flex items-center gap-2">
-                    <input
-                      value={cls.value}
-                      onChange={(e) => updateClass(cls.id, e.target.value)}
-                      type="text"
-                      placeholder="例: business / private"
-                      className="grow text-base border rounded-lg px-3 py-2 border-gray-300 focus:outline-none focus:border-lime-500"
-                    />
-                    <button
-                      type="button"
-                      aria-label="削除"
-                      onClick={() => removeClass(cls.id)}
-                      className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 active:bg-gray-100"
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
+          <div className="space-y-5">
+            {/* 設定する車両の選択 ＋ 追加 */}
+            <div className="flex items-end gap-2">
+              <label className="grow min-w-0">
+                <span className="text-xs font-medium text-gray-600">設定する車両</span>
+                {vehicles.length ? (
+                  <select
+                    value={selectedId ?? ''}
+                    onChange={handleSelect}
+                    className="w-full text-lg font-medium py-2 px-3 mt-1 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
+                  >
+                    {vehicles.map(({ id, name }) => (
+                      <option key={id} value={id}>{name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-sm text-gray-500 py-2">車両がありません。右のボタンから追加してください。</p>
+                )}
+              </label>
               <button
                 type="button"
-                onClick={addClass}
-                className="mt-2 text-sm text-lime-700 font-medium active:text-lime-800"
+                onClick={handleAddVehicle}
+                aria-label="車両を追加"
+                className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg border border-gray-300 text-lime-700 text-2xl font-light active:bg-gray-100"
               >
-                ＋ 走行種別を追加
+                ＋
               </button>
             </div>
 
-            {/* 共有 */}
-            <div>
-              <span className="text-xs font-medium text-gray-600">共有</span>
-              <button
-                type="button"
-                onClick={share}
-                className="mt-1 block text-sm text-blue-700 font-medium active:text-blue-800"
-              >
-                ＋ 共有相手を追加
-              </button>
-            </div>
+            {selectedId && (
+              <form className="space-y-5" onSubmit={handleSave}>
+                {/* 車両名 */}
+                <label className="block">
+                  <span className="text-xs font-medium text-gray-600">車両名</span>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    type="text"
+                    className="w-full text-lg font-medium border-b-2 border-lime-500 bg-transparent focus:outline-none py-1"
+                  />
+                </label>
 
-            {/* エラー表示 */}
-            {error && <p className="text-sm text-red-600 text-center" role="alert">{error}</p>}
+                {/* 走行種別マスタ */}
+                <div>
+                  <span className="text-xs font-medium text-gray-600">走行種別</span>
+                  <ul className="space-y-2 mt-1">
+                    {classes.map((cls) => (
+                      <li key={cls.id} className="flex items-center gap-2">
+                        <input
+                          value={cls.value}
+                          onChange={(e) => updateClass(cls.id, e.target.value)}
+                          type="text"
+                          placeholder="例: business / private"
+                          className="grow text-base border rounded-lg px-3 py-2 border-gray-300 focus:outline-none focus:border-lime-500"
+                        />
+                        <button
+                          type="button"
+                          aria-label="削除"
+                          onClick={() => removeClass(cls.id)}
+                          className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full border border-gray-300 text-gray-500 active:bg-gray-100"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    onClick={addClass}
+                    className="mt-2 text-sm text-lime-700 font-medium active:text-lime-800"
+                  >
+                    ＋ 走行種別を追加
+                  </button>
+                </div>
 
-            {/* 操作 */}
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 border-2 border-gray-300 text-gray-600 rounded-xl py-2.5 font-medium active:bg-gray-100"
-              >
-                キャンセル
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600 disabled:opacity-60"
-              >
-                保存する
-              </button>
-            </div>
-          </form>
+                {/* 共有 */}
+                <div>
+                  <span className="text-xs font-medium text-gray-600">共有</span>
+                  <button
+                    type="button"
+                    onClick={share}
+                    className="mt-1 block text-sm text-blue-700 font-medium active:text-blue-800"
+                  >
+                    ＋ 共有相手を追加
+                  </button>
+                </div>
+
+                {/* エラー表示 */}
+                {error && <p className="text-sm text-red-600 text-center" role="alert">{error}</p>}
+
+                {/* 操作 */}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 border-2 border-gray-300 text-gray-600 rounded-xl py-2.5 font-medium active:bg-gray-100"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600 disabled:opacity-60"
+                  >
+                    保存する
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* 車両が無いときのエラー表示と閉じる */}
+            {!selectedId && (
+              <>
+                {error && <p className="text-sm text-red-600 text-center" role="alert">{error}</p>}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full text-sm text-gray-500 py-2 active:text-gray-700"
+                >
+                  閉じる
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     </div>

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
 import {
   createTrip,
-  createVehicle,
   getUserState,
   listTrips,
   listVehicles,
@@ -58,7 +57,17 @@ function decodeJwt(token: string): Record<string, unknown> | null {
   }
 }
 
-export default function TripClassificater({ userId }: { userId: string }) {
+export default function TripClassificater({
+  userId,
+  refreshKey,
+  onNoVehicles,
+}: {
+  userId: string;
+  // 車両設定での変更を反映させるための再取得トリガー
+  refreshKey: number;
+  // 車両が1台も無いときに呼ぶ（App 側で車両設定を自動的に開く）
+  onNoVehicles: () => void;
+}) {
   const { getToken } = useAuth();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
@@ -92,7 +101,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
       ? state.vehicleId
       : vs[0]?.id ?? null;
     setCurrentVehicleId(selected);
-    return selected;
+    return vs;
   }, [token, userId]);
 
   const refreshTrips = useCallback(async (vehicleId: string) => {
@@ -106,7 +115,9 @@ export default function TripClassificater({ userId }: { userId: string }) {
       setLoading(true);
       setLoadError(null);
       try {
-        await refreshVehicles();
+        const vs = await refreshVehicles();
+        // 車両が無ければ App に通知（車両設定を自動で開く）
+        if (active && vs.length === 0) onNoVehicles();
       } catch (e) {
         // 取得失敗時に無限ローダーにならないよう、原因を画面に出す
         if (active) setLoadError(formatError(e));
@@ -117,7 +128,7 @@ export default function TripClassificater({ userId }: { userId: string }) {
     return () => {
       active = false;
     };
-  }, [refreshVehicles]);
+  }, [refreshVehicles, refreshKey, onNoVehicles]);
 
   useEffect(() => {
     if (!currentVehicleId) {
@@ -186,24 +197,6 @@ export default function TripClassificater({ userId }: { userId: string }) {
     }
   }
 
-  async function handleCreateVehicle() {
-    const name = prompt('車の名称を入力してください');
-    if (name === null) return;
-    // 作成と一覧更新は分けて扱う。作成成功後に更新だけ失敗した場合、
-    // 「作成失敗」と誤表示して再試行＝重複作成を招かないようにする。
-    try {
-      await createVehicle(await token(), userId, name || '車両', ['業務', '私用']);
-    } catch (e) {
-      alert(`車両の作成に失敗しました: ${formatError(e)}`);
-      return;
-    }
-    try {
-      await refreshVehicles();
-    } catch {
-      alert('車両は作成されましたが、一覧の更新に失敗しました。再読み込みしてください。');
-    }
-  }
-
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
   function handleCreateTrip(trip: { odo: number; class: string; timestamp: Date }): string | null {
     const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.getTime() > timestamp.getTime());
@@ -251,14 +244,9 @@ export default function TripClassificater({ userId }: { userId: string }) {
 
   if (!vehicles.length) {
     return (
-      <div className="text-center py-16 space-y-4">
-        <p className="text-gray-500">まだ車両がありません。</p>
-        <button
-          onClick={handleCreateVehicle}
-          className="bg-lime-500 text-white rounded-xl py-3 px-6 font-bold shadow active:bg-lime-600"
-        >
-          ＋ 車両を作成
-        </button>
+      <div className="text-center py-16 space-y-2 text-gray-500">
+        <p>まだ車両がありません。</p>
+        <p className="text-sm">設定（⚙）→ 車両設定 から追加してください。</p>
       </div>
     );
   }
@@ -279,15 +267,6 @@ export default function TripClassificater({ userId }: { userId: string }) {
             ))}
           </select>
         </label>
-        {/* 常設の車両追加ボタン（車両が1台以上ある場合でも新規追加できるようにする） */}
-        <button
-          type="button"
-          onClick={handleCreateVehicle}
-          aria-label="車両を追加"
-          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg border border-gray-300 text-lime-700 text-2xl font-light active:bg-gray-100"
-        >
-          ＋
-        </button>
       </section>
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
