@@ -19,9 +19,9 @@ export default function SettingsMenu({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  function handle(open: () => void) {
+  function handle(action: () => void) {
     setOpen(false);
-    open();
+    action();
   }
 
   return (

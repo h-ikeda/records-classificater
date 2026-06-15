@@ -37,26 +37,6 @@ function formatNumber(number: number) {
   return number.toFixed(6).replace(/\.?0*$/, '');
 }
 
-// drizzle は実際の DB エラーを cause に格納する（message はクエリ文のみ）。
-// 原因を診断できるよう cause まで取り出す。
-function formatError(e: unknown): string {
-  const err = e as { message?: string; cause?: { message?: string } };
-  if (err?.cause?.message) return `${err.message}\n原因: ${err.cause.message}`;
-  return err?.message ?? String(e);
-}
-
-// 診断用: JWT を検証せずにペイロードだけ復号し、発行元などを確認する。
-// Neon に登録した JWKS の発行元(iss)と突き合わせるために使う。
-function decodeJwt(token: string): Record<string, unknown> | null {
-  try {
-    const payload = token.split('.')[1];
-    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
 export default function TripClassificater({
   userId,
   refreshKey,
@@ -75,23 +55,9 @@ export default function TripClassificater({
   const [trips, setTrips] = useState<Trip[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [tokenInfo, setTokenInfo] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
-
-  // 診断用: 取得した JWT の発行元(iss)/sub/azp を表示用に保持する。
-  useEffect(() => {
-    (async () => {
-      const t = await token();
-      const claims = t ? decodeJwt(t) : null;
-      setTokenInfo(
-        claims
-          ? `iss=${claims.iss ?? '(なし)'} / sub=${claims.sub ?? '(なし)'} / azp=${claims.azp ?? '(なし)'}`
-          : 'JWT を取得できませんでした',
-      );
-    })();
-  }, [token]);
 
   const refreshVehicles = useCallback(async () => {
     const t = await token();
@@ -113,14 +79,15 @@ export default function TripClassificater({
     let active = true;
     (async () => {
       setLoading(true);
-      setLoadError(null);
+      setLoadError(false);
       try {
         const vs = await refreshVehicles();
         // 車両が無ければ App に通知（車両設定を自動で開く）
         if (active && vs.length === 0) onNoVehicles();
       } catch (e) {
-        // 取得失敗時に無限ローダーにならないよう、原因を画面に出す
-        if (active) setLoadError(formatError(e));
+        // 詳細はコンソールへ、画面は固定文言（内部情報を露出しない）
+        console.error('Failed to load vehicles:', e);
+        if (active) setLoadError(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -187,11 +154,12 @@ export default function TripClassificater({
 
   async function retryLoad() {
     setLoading(true);
-    setLoadError(null);
+    setLoadError(false);
     try {
       await refreshVehicles();
     } catch (e) {
-      setLoadError(formatError(e));
+      console.error('Failed to load vehicles:', e);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -209,7 +177,8 @@ export default function TripClassificater({
         await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
         await refreshTrips(currentVehicleId);
       } catch (e) {
-        alert(`記録の追加に失敗しました: ${formatError(e)}`);
+        console.error('Failed to add trip:', e);
+        alert('記録の追加に失敗しました。時間をおいて再度お試しください。');
       }
     })();
     setNewTripEnabled(false);
@@ -222,16 +191,9 @@ export default function TripClassificater({
 
   if (loadError) {
     return (
-      <div className="p-6 text-sm text-gray-800 space-y-3">
+      <div className="p-6 text-sm text-gray-800 space-y-3 text-center">
         <p className="text-red-700 font-bold">読み込みエラー</p>
-        <p>データの取得に失敗しました。Neon の RLS 設定や接続を確認してください。</p>
-        <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-red-800">{loadError}</pre>
-        {tokenInfo && (
-          <div>
-            <p className="text-xs text-gray-500">JWT 診断（Neon に登録した JWKS の発行元と一致するか確認）:</p>
-            <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-gray-700">{tokenInfo}</pre>
-          </div>
-        )}
+        <p>データの取得に失敗しました。時間をおいて再試行してください。</p>
         <button
           onClick={retryLoad}
           className="bg-lime-500 text-white rounded-xl py-2 px-5 font-bold shadow active:bg-lime-600"

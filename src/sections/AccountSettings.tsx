@@ -18,7 +18,14 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
         <div className="space-y-3 mt-2">
           <button
             type="button"
-            onClick={() => signOut()}
+            onClick={async () => {
+              try {
+                await signOut();
+              } catch (e) {
+                console.error('Failed to sign out:', e);
+                alert('ログアウトに失敗しました。時間をおいて再度お試しください。');
+              }
+            }}
             className="w-full border-2 border-gray-300 text-gray-700 rounded-xl py-2.5 font-medium active:bg-gray-100"
           >
             ログアウト

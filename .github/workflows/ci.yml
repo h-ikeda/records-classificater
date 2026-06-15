@@ -5,6 +5,10 @@ name: CI
     branches: [main]
   pull_request:
 
+# 最小権限（CI はチェックアウトと読み取りのみ）
+permissions:
+  contents: read
+
 jobs:
   typecheck-build:
     runs-on: ubuntu-latest

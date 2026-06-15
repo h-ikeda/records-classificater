@@ -77,18 +77,27 @@ export default function VehicleSettings({
   async function handleAddVehicle() {
     const inputName = prompt('車の名称を入力してください');
     if (inputName === null) return;
+    // 作成と一覧更新を分離。作成成功後に更新だけ失敗しても「追加失敗」と誤表示して
+    // 再試行＝重複作成を招かないようにする。
+    let id: string;
     try {
-      const id = await createVehicle(await token(), userId, inputName || '車両', ['業務', '私用']);
-      const t = await token();
-      const list = await listVehicles(t);
+      id = await createVehicle(await token(), userId, inputName || '車両', ['業務', '私用']);
+    } catch (e) {
+      console.error('Failed to create vehicle:', e);
+      setError('車両の追加に失敗しました。時間をおいて再度お試しください。');
+      return;
+    }
+    try {
+      const list = await listVehicles(await token());
       setVehicles(list);
       setSelectedId(id);
       populate(list, id);
       setError('');
-      onChanged();
     } catch (e) {
-      setError(`車両の追加に失敗しました: ${(e as Error).message}`);
+      console.error('Failed to refresh vehicles after add:', e);
+      setError('車両は追加されましたが、一覧の更新に失敗しました。画面を閉じて開き直してください。');
     }
+    onChanged();
   }
 
   function updateClass(id: string, value: string) {

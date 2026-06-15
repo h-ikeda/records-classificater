@@ -22,13 +22,11 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      // 詳細はコンソールに出し、画面には内部情報を露出しない固定文言を表示する
       return (
         <div className="p-6 text-sm text-gray-800">
           <h1 className="text-lg font-bold text-red-700 mb-2">エラーが発生しました</h1>
-          <p className="mb-2">画面を表示できませんでした。詳細はブラウザのコンソールを確認してください。</p>
-          <pre className="whitespace-pre-wrap bg-gray-100 rounded p-3 text-xs text-red-800">
-            {this.state.error.message}
-          </pre>
+          <p>画面を表示できませんでした。時間をおいて再読み込みしてください。</p>
         </div>
       );
     }
