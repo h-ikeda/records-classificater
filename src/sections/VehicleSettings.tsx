@@ -81,7 +81,7 @@ export default function VehicleSettings({
     // 再試行＝重複作成を招かないようにする。
     let id: string;
     try {
-      id = await createVehicle(await token(), userId, inputName || '車両', ['業務', '私用']);
+      id = await createVehicle(await token(), inputName || '車両', ['業務', '私用']);
     } catch (e) {
       console.error('Failed to create vehicle:', e);
       setError('車両の追加に失敗しました。時間をおいて再度お試しください。');

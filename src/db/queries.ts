@@ -7,6 +7,7 @@ import type { NewTrip, Trip, UserState, Vehicle } from './schema';
 // PostgREST はカラム名（snake_case）で返すため、アプリの型（camelCase）へ変換する。
 interface VehicleRow {
   id: string;
+  owner_id: string;
   name: string;
   classes: string[];
   created_at: string;
@@ -26,7 +27,13 @@ interface UserStateRow {
 }
 
 function toVehicle(r: VehicleRow): Vehicle {
-  return { id: r.id, name: r.name, classes: r.classes, createdAt: new Date(r.created_at) };
+  return {
+    id: r.id,
+    ownerId: r.owner_id,
+    name: r.name,
+    classes: r.classes,
+    createdAt: new Date(r.created_at),
+  };
 }
 function toTrip(r: TripRow): Trip {
   return {
@@ -75,30 +82,19 @@ export async function getVehicle(token: string, vehicleId: string): Promise<Vehi
 }
 
 /**
- * 車両を新規作成し、作成者を read/write 権限で登録、現在の車両として選択する。
- * Data API はトランザクション不可のため vehicle → member → user_state の順に投入する。
+ * 車両を新規作成し、作成者を所有者兼 read/write メンバーとして登録、現在の車両として選択する。
+ * vehicle・メンバー・user_state の投入を 1 トランザクションで行うため、サーバー側の
+ * create_vehicle RPC（SECURITY DEFINER）を呼ぶ。作成された車両 id を返す。
  */
 export async function createVehicle(
   token: string,
-  userId: string,
   name: string,
   classes: string[],
 ): Promise<string> {
-  const id = crypto.randomUUID();
-  await dataApi(token, '/vehicles', {
+  // PostgREST の関数呼び出し（/rpc/<name>）。スカラ uuid が返る。
+  const id = await dataApi<string>(token, '/rpc/create_vehicle', {
     method: 'POST',
-    prefer: 'return=minimal',
-    body: { id, name, classes },
-  });
-  await dataApi(token, '/vehicle_members', {
-    method: 'POST',
-    prefer: 'return=minimal',
-    body: { vehicle_id: id, user_id: userId, can_read: true, can_write: true },
-  });
-  await dataApi(token, '/user_states?on_conflict=user_id', {
-    method: 'POST',
-    prefer: 'resolution=merge-duplicates,return=minimal',
-    body: { user_id: userId, vehicle_id: id, updated_at: new Date().toISOString() },
+    body: { p_name: name, p_classes: classes },
   });
   return id;
 }
@@ -155,5 +151,17 @@ export async function deleteTrip(token: string, vehicleId: string, tripId: strin
   await dataApi(token, `/trips?id=eq.${tripId}&vehicle_id=eq.${vehicleId}`, {
     method: 'DELETE',
     prefer: 'return=minimal',
+  });
+}
+
+/**
+ * 自分のアカウントに紐づく Neon 上のデータ（所有車両・メンバー行・状態）を削除する。
+ * Clerk のアカウント削除前に呼び、DB 側に孤立データが残らないようにする。
+ */
+export async function deleteMyAccountData(token: string): Promise<void> {
+  await dataApi(token, '/rpc/delete_my_account_data', {
+    method: 'POST',
+    prefer: 'return=minimal',
+    body: {},
   });
 }

@@ -26,7 +26,7 @@ export function sampleData(userId: string): {
     { id: tid(7), odo: 370, class: '私用', timestamp: new Date(now) },
   ];
   return {
-    vehicle: { id: vehicleId, name: 'サンプル車両', classes },
+    vehicle: { id: vehicleId, ownerId: userId, name: 'サンプル車両', classes },
     member: { vehicleId, userId, canRead: true, canWrite: true },
     trips,
   };

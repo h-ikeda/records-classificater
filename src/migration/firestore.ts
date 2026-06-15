@@ -55,10 +55,15 @@ export function buildRows(snapshot: FirestoreSnapshot): MigrationRows {
   const idMap = new Map<string, string>();
 
   for (const v of snapshot.vehicles) {
+    const perms = v.permissions ?? { read: [], write: [] };
+    // 所有者は最初の write 権限者（無ければ最初の read 権限者）とする。
+    // 権限者が誰も居ない車両は所有者を決められないためスキップする。
+    const ownerId = perms.write?.[0] ?? perms.read?.[0];
+    if (!ownerId) continue;
     const id = randomUUID();
     idMap.set(v.id, id);
-    rows.vehicles.push({ id, name: v.name, classes: v.classes ?? [] });
-    rows.members.push(...buildMembers(id, v.permissions ?? { read: [], write: [] }));
+    rows.vehicles.push({ id, ownerId, name: v.name, classes: v.classes ?? [] });
+    rows.members.push(...buildMembers(id, perms));
     for (const t of v.trips) {
       rows.trips.push({ vehicleId: id, odo: t.odo, class: t.class, timestamp: t.timestamp });
     }
@@ -79,7 +84,7 @@ export function buildRows(snapshot: FirestoreSnapshot): MigrationRows {
     if (!legacy.data.length) continue;
     const id = randomUUID();
     const classes = Array.from(new Set(legacy.data.map((t) => t.class)));
-    rows.vehicles.push({ id, name: '(移行された車両)', classes });
+    rows.vehicles.push({ id, ownerId: legacy.uid, name: '(移行された車両)', classes });
     rows.members.push({ vehicleId: id, userId: legacy.uid, canRead: true, canWrite: true });
     for (const t of legacy.data) {
       rows.trips.push({ vehicleId: id, odo: t.odo, class: t.class, timestamp: t.timestamp });

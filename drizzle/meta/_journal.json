@@ -36,6 +36,13 @@
       "when": 1781495949910,
       "tag": "0004_secdef_harden",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781523765100,
+      "tag": "0005_owner_and_rpc",
+      "breakpoints": true
     }
   ]
 }

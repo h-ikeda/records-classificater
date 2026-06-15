@@ -22,6 +22,9 @@ const canRead = (vehicleIdColumn: SQLWrapper) =>
   sql`public.can_read_vehicle(${vehicleIdColumn})`;
 const canWrite = (vehicleIdColumn: SQLWrapper) =>
   sql`public.can_write_vehicle(${vehicleIdColumn})`;
+// 所有者判定。メンバー管理（共有の追加・変更）と車両削除を所有者に限定するために使う。
+const isOwner = (vehicleIdColumn: SQLWrapper) =>
+  sql`public.is_vehicle_owner(${vehicleIdColumn})`;
 
 /**
  * 各ユーザーの状態。旧 Firestore の `users/{uid}`（state.vehicle）に対応。自分の行のみ読み書き可。
@@ -49,6 +52,8 @@ export const vehicles = pgTable(
   'vehicles',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // 所有者（作成者）の Clerk sub。共有や削除の権限判定の基準になる。
+    ownerId: text('owner_id').notNull(),
     name: text('name').notNull(),
     classes: text('classes').array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -56,16 +61,21 @@ export const vehicles = pgTable(
   (t) => [
     // 読み取り: read 権限を持つ車両のみ（旧 list/get）
     pgPolicy('vehicles_select', { for: 'select', to: authenticatedRole, using: canRead(t.id) }),
-    // 作成: 認証済みなら誰でも（旧 create）。作成者は別途 vehicle_members へ自身を登録する。
-    pgPolicy('vehicles_insert', { for: 'insert', to: authenticatedRole, withCheck: sql`true` }),
-    // 更新・削除: write 権限を持つユーザーのみ（旧 update）
+    // 作成: 自分を所有者とする行のみ作成可。通常は create_vehicle RPC 経由で作成する。
+    pgPolicy('vehicles_insert', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`${t.ownerId} = ${currentUserId}`,
+    }),
+    // 更新: write 権限を持つユーザー（旧 update）。
     pgPolicy('vehicles_update', {
       for: 'update',
       to: authenticatedRole,
       using: canWrite(t.id),
       withCheck: canWrite(t.id),
     }),
-    pgPolicy('vehicles_delete', { for: 'delete', to: authenticatedRole, using: canWrite(t.id) }),
+    // 削除: 所有者のみ（共有された write 権限者による削除を防ぐ）。
+    pgPolicy('vehicles_delete', { for: 'delete', to: authenticatedRole, using: isOwner(t.id) }),
   ],
 );
 
@@ -90,23 +100,25 @@ export const vehicleMembers = pgTable(
       to: authenticatedRole,
       using: sql`${t.userId} = ${currentUserId}`,
     }),
-    // 追加: 自分自身の登録（車両作成直後）、またはその車両の write 権限者による共有（旧 share）
+    // 追加: 車両の所有者のみ（旧 share）。自己登録による権限昇格を防ぐため、
+    // 作成者自身の初期登録は create_vehicle RPC（SECURITY DEFINER）が行う。
     pgPolicy('vehicle_members_insert', {
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`${t.userId} = ${currentUserId} or ${canWrite(t.vehicleId)}`,
+      withCheck: isOwner(t.vehicleId),
     }),
-    // 更新: その車両の write 権限者のみ
+    // 更新: 車両の所有者のみ
     pgPolicy('vehicle_members_update', {
       for: 'update',
       to: authenticatedRole,
-      using: canWrite(t.vehicleId),
+      using: isOwner(t.vehicleId),
+      withCheck: isOwner(t.vehicleId),
     }),
-    // 削除: write 権限者、または自身の権限を外す場合
+    // 削除: 所有者、または自身の権限を外す場合
     pgPolicy('vehicle_members_delete', {
       for: 'delete',
       to: authenticatedRole,
-      using: sql`${t.userId} = ${currentUserId} or ${canWrite(t.vehicleId)}`,
+      using: sql`${t.userId} = ${currentUserId} or ${isOwner(t.vehicleId)}`,
     }),
   ],
 );
@@ -139,8 +151,18 @@ export const trips = pgTable(
           and ${t.class} = any(v.classes)
       )`,
     }),
-    // 更新・削除: 車両の write 権限者のみ
-    pgPolicy('trips_update', { for: 'update', to: authenticatedRole, using: canWrite(t.vehicleId) }),
+    // 更新: write 権限者で、変更後の class も車両の classes に含まれる場合のみ（挿入時と同条件）
+    pgPolicy('trips_update', {
+      for: 'update',
+      to: authenticatedRole,
+      using: canWrite(t.vehicleId),
+      withCheck: sql`${canWrite(t.vehicleId)} and exists (
+        select 1 from vehicles v
+        where v.id = ${t.vehicleId}
+          and ${t.class} = any(v.classes)
+      )`,
+    }),
+    // 削除: 車両の write 権限者のみ
     pgPolicy('trips_delete', { for: 'delete', to: authenticatedRole, using: canWrite(t.vehicleId) }),
   ],
 );
