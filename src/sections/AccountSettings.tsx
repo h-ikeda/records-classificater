@@ -1,8 +1,11 @@
-import { useClerk } from '@clerk/clerk-react';
+import { useClerk, useUser } from '@clerk/clerk-react';
 import DeleteAccount from '../components/DeleteAccount';
 
 export default function AccountSettings({ onClose }: { onClose: () => void }) {
   const { signOut } = useClerk();
+  const { user } = useUser();
+  const displayName =
+    user?.fullName || user?.username || user?.primaryEmailAddress?.emailAddress || 'ユーザー';
 
   return (
     <div
@@ -14,6 +17,27 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
         style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}
       >
         <h3 className="text-base font-bold text-center py-1">アカウント設定</h3>
+
+        {/* サインイン中のユーザー情報（Google ログイン: アバターと表示名） */}
+        {user && (
+          <div className="flex items-center gap-3 py-3 border-b border-gray-100">
+            {user.imageUrl && (
+              <img
+                src={user.imageUrl}
+                alt=""
+                className="w-12 h-12 rounded-full shrink-0 object-cover"
+              />
+            )}
+            <div className="min-w-0">
+              <p className="font-medium text-gray-800 truncate">{displayName}</p>
+              {user.primaryEmailAddress && (
+                <p className="text-sm text-gray-500 truncate">
+                  {user.primaryEmailAddress.emailAddress}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="space-y-3 mt-2">
           <button
