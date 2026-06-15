@@ -47,5 +47,27 @@ if (unpooled) {
   console.warn('DATABASE_URL is not set; skipping migrations.');
 }
 
+// ブラウザ用の Neon Data API(REST) URL を決める。
+// 明示設定が無ければ DATABASE_URL から導出する（プレビューごとに正しいブランチを指す）。
+//   例: ep-xxx-pooler.c-2.<region>.aws.neon.tech
+//     → https://ep-xxx.apirest.c-2.<region>.aws.neon.tech/<db>/rest
+let dataApiUrl = process.env.NEXT_PUBLIC_NEON_DATA_API_URL;
+if (!dataApiUrl && pooled) {
+  try {
+    const u = new URL(pooled);
+    const host = u.hostname.replace('-pooler', '');
+    const dot = host.indexOf('.');
+    const apiHost = host.slice(0, dot) + '.apirest' + host.slice(dot);
+    const db = u.pathname.replace(/^\//, '') || 'neondb';
+    dataApiUrl = `https://${apiHost}/${db}/rest`;
+  } catch {
+    // 導出に失敗した場合は未設定のまま（実行時に明示エラーになる）
+  }
+}
+
 // Parcel ビルド。NEXT_PUBLIC_* は process.env からそのまま埋め込まれる。
-execSync('parcel build', { stdio: 'inherit' });
+execSync('parcel build', {
+  stdio: 'inherit',
+  env: { ...process.env, NEXT_PUBLIC_NEON_DATA_API_URL: dataApiUrl ?? '' },
+});
+
