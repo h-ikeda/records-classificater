@@ -148,8 +148,13 @@ export default function TripClassificater({
 
   async function handleSelectVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
     const id = event.target.value;
-    setCurrentVehicleId(id);
-    await setCurrentVehicleQuery(await token(), userId, id);
+    try {
+      await setCurrentVehicleQuery(await token(), userId, id);
+      setCurrentVehicleId(id);
+    } catch (e) {
+      console.error('Failed to switch vehicle:', e);
+      alert('車両の切り替えに失敗しました');
+    }
   }
 
   async function retryLoad() {

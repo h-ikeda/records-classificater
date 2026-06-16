@@ -104,7 +104,7 @@ export async function updateVehicle(
   vehicleId: string,
   values: { name: string; classes: string[] },
 ): Promise<void> {
-  await dataApi(token, `/vehicles?id=eq.${vehicleId}`, {
+  await dataApi(token, `/vehicles?id=eq.${encodeURIComponent(vehicleId)}`, {
     method: 'PATCH',
     prefer: 'return=minimal',
     body: { name: values.name, classes: values.classes },

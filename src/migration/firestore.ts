@@ -40,7 +40,7 @@ function buildMembers(vehicleId: string, permissions: { read: string[]; write: s
   return Array.from(everyone).map((userId) => ({
     vehicleId,
     userId,
-    canRead: readers.has(userId),
+    canRead: readers.has(userId) || writers.has(userId),
     canWrite: writers.has(userId),
   }));
 }

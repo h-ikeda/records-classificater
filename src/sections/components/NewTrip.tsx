@@ -60,13 +60,19 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
     }
     setSubmitting(true);
     // onSubmit は却下時に理由（文字列）を返す。成功時は null。
-    const rejection = await onSubmit({
-      timestamp: date,
-      odo: newODO,
-      class: newClass,
-    });
-    setSubmitting(false);
-    if (rejection) setError(rejection);
+    try {
+      const rejection = await onSubmit({
+        timestamp: date,
+        odo: newODO,
+        class: newClass,
+      });
+      if (rejection) setError(rejection);
+    } catch (e) {
+      console.error('Failed to submit trip:', e);
+      setError('送信中にエラーが発生しました');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
