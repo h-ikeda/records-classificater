@@ -72,7 +72,7 @@ export default function TripClassificater({
 
   const refreshTrips = useCallback(async (vehicleId: string) => {
     const t = await token();
-    setTrips(await listTrips(t, vehicleId));
+    return listTrips(t, vehicleId);
   }, [token]);
 
   useEffect(() => {
@@ -105,7 +105,8 @@ export default function TripClassificater({
     let active = true;
     (async () => {
       try {
-        await refreshTrips(currentVehicleId);
+        const newTrips = await refreshTrips(currentVehicleId);
+        if (active) setTrips(newTrips);
       } catch (e) {
         console.error('Failed to load trips:', e);
         if (active) setLoadError(true);
@@ -190,7 +191,7 @@ export default function TripClassificater({
     if (!currentVehicleId) return '車両が選択されていません';
     try {
       await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
-      await refreshTrips(currentVehicleId);
+      setTrips(await refreshTrips(currentVehicleId));
     } catch (e) {
       console.error('Failed to add trip:', e);
       return '記録の追加に失敗しました。時間をおいて再試行してください。';
