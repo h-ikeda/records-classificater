@@ -153,15 +153,3 @@ export async function deleteTrip(token: string, vehicleId: string, tripId: strin
     prefer: 'return=minimal',
   });
 }
-
-/**
- * 自分のアカウントに紐づく Neon 上のデータ（所有車両・メンバー行・状態）を削除する。
- * Clerk のアカウント削除前に呼び、DB 側に孤立データが残らないようにする。
- */
-export async function deleteMyAccountData(token: string): Promise<void> {
-  await dataApi(token, '/rpc/delete_my_account_data', {
-    method: 'POST',
-    prefer: 'return=minimal',
-    body: {},
-  });
-}

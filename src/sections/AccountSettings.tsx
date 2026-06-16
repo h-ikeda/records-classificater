@@ -1,6 +1,5 @@
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { useEffect } from 'react';
-import DeleteAccount from '../components/DeleteAccount';
 
 export default function AccountSettings({ onClose }: { onClose: () => void }) {
   const { signOut } = useClerk();
@@ -73,10 +72,6 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
           >
             ログアウト
           </button>
-
-          <div className="border-t border-gray-100 pt-3 text-center">
-            <DeleteAccount className="text-xs text-gray-400 underline active:text-red-600" />
-          </div>
 
           <button
             type="button"
