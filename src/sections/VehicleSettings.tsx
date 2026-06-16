@@ -168,8 +168,8 @@ export default function VehicleSettings({
         ) : (
           <div className="space-y-5">
             {/* 設定する車両の選択 ＋ 追加 */}
-            <div className="flex items-end gap-2">
-              <label className="grow min-w-0">
+            <div>
+              <label className="block">
                 <span className="text-xs font-medium text-gray-600">設定する車両</span>
                 {vehicles.length ? (
                   <select
@@ -182,16 +182,15 @@ export default function VehicleSettings({
                     ))}
                   </select>
                 ) : (
-                  <p className="text-sm text-gray-500 py-2">車両がありません。右のボタンから追加してください。</p>
+                  <p className="text-sm text-gray-500 py-2">車両がありません。下のボタンから追加してください。</p>
                 )}
               </label>
               <button
                 type="button"
                 onClick={handleAddVehicle}
-                aria-label="車両を追加"
-                className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg border border-gray-300 text-lime-700 text-2xl font-light active:bg-gray-100"
+                className="mt-2 text-sm text-lime-700 font-medium active:text-lime-800"
               >
-                ＋
+                ＋ 車両を追加
               </button>
             </div>
 

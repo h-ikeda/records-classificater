@@ -74,9 +74,8 @@ export default function AccountSettings({ onClose }: { onClose: () => void }) {
             ログアウト
           </button>
 
-          <div className="border-t border-gray-100 pt-3">
-            <p className="text-xs text-gray-500 mb-1">危険な操作</p>
-            <DeleteAccount className="w-full border-2 border-red-300 text-red-700 rounded-xl py-2.5 font-medium active:bg-red-50" />
+          <div className="border-t border-gray-100 pt-3 text-center">
+            <DeleteAccount className="text-xs text-gray-400 underline active:text-red-600" />
           </div>
 
           <button
