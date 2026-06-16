@@ -1,5 +1,5 @@
-import { useAuth } from '@clerk/clerk-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAuthToken } from '../hooks/useAuthToken';
 import NewTrip from './components/NewTrip';
 import {
   createTrip,
@@ -48,7 +48,7 @@ export default function TripClassificater({
   // 車両が1台も無いときに呼ぶ（App 側で車両設定を自動的に開く）
   onNoVehicles: () => void;
 }) {
-  const { getToken } = useAuth();
+  const token = useAuthToken();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
   const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
@@ -56,19 +56,6 @@ export default function TripClassificater({
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-
-  // サインイン直後は getToken() が一時的に null を返すことがある。
-  // 空トークンで Data API を呼ぶと anon ロール扱いになり、RLS で 0 件になって
-  // 「車両が無い」と誤判定してしまうため、取得できるまで短くリトライする。
-  // 取得できなければ throw し、空クエリではなく読み込みエラーとして扱う。
-  const token = useCallback(async () => {
-    for (let i = 0; i < 5; i++) {
-      const t = await getToken();
-      if (t) return t;
-      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
-    }
-    throw new Error('認証トークンを取得できませんでした');
-  }, [getToken]);
 
   const refreshVehicles = useCallback(async () => {
     const t = await token();

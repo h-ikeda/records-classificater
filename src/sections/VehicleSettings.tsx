@@ -1,5 +1,5 @@
-import { useAuth } from '@clerk/clerk-react';
 import { useCallback, useEffect, useState } from 'react';
+import { useAuthToken } from '../hooks/useAuthToken';
 import {
   createVehicle,
   getUserState,
@@ -20,7 +20,7 @@ export default function VehicleSettings({
   onChanged: () => void;
   onClose: () => void;
 }) {
-  const { getToken } = useAuth();
+  const token = useAuthToken();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,18 +29,6 @@ export default function VehicleSettings({
   const [classes, setClasses] = useState<{ id: string; value: string }[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-
-  // サインイン直後は getToken() が一時的に null を返すことがある。
-  // 空トークンで Data API を呼ぶと anon ロール扱いになり RLS で 0 件になるため、
-  // 取得できるまで短くリトライし、取得できなければ throw する。
-  const token = useCallback(async () => {
-    for (let i = 0; i < 5; i++) {
-      const t = await getToken();
-      if (t) return t;
-      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
-    }
-    throw new Error('認証トークンを取得できませんでした');
-  }, [getToken]);
 
   // 指定した車両の値をフォームへ反映する
   const populate = useCallback((list: Vehicle[], id: string | null) => {
