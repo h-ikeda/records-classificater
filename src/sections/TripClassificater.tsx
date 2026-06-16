@@ -1,22 +1,18 @@
-import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@clerk/clerk-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
-import { tripConverter, type Trip } from '../firestore/definitions/Trip';
-import { userConverter } from '../firestore/definitions/User';
-import { tripsConverter } from '../firestore/definitions/Trips';
-import { Vehicle, vehicleConverter } from '../firestore/definitions/Vehicle';
+import {
+  createTrip,
+  getUserState,
+  listTrips,
+  listVehicles,
+  setCurrentVehicle as setCurrentVehicleQuery,
+} from '../db/queries';
+import type { Trip, Vehicle } from '../db/schema';
+import Loader from '../components/Loader';
 
-interface TripIdentified extends Trip {
-  id: string,
-}
-
-interface TripCalculated extends TripIdentified {
-  trip: number,
-}
-
-interface VehicleIdentified extends Vehicle {
-  id: string,
+interface TripCalculated extends Trip {
+  trip: number;
 }
 
 // 分類ごとに色を割り当て、業務用と私用を一目で見分けられるようにする
@@ -30,11 +26,10 @@ const classPalette = [
 ];
 
 function sortByTimestamp({ timestamp: t1 }: Trip, { timestamp: t2 }: Trip) {
-  return (t1 as unknown as number) - (t2 as unknown as number);
+  return t1.getTime() - t2.getTime();
 }
 
-function formatDate(timestamp: Timestamp) {
-  const d = timestamp.toDate();
+function formatDate(d: Date) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
@@ -42,112 +37,102 @@ function formatNumber(number: number) {
   return number.toFixed(6).replace(/\.?0*$/, '');
 }
 
-export default function TripClassificater({ currentUser }: { currentUser: User }) {
-  // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
-  const db = getFirestore();
+export default function TripClassificater({
+  userId,
+  refreshKey,
+  onNoVehicles,
+}: {
+  userId: string;
+  // 車両設定での変更を反映させるための再取得トリガー
+  refreshKey: number;
+  // 車両が1台も無いときに呼ぶ（App 側で車両設定を自動的に開く）
+  onNoVehicles: () => void;
+}) {
+  const { getToken } = useAuth();
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
-  const [vehicleClasses, setVehicleClasses] = useState<string[]>([]);
-  const [currentYear, setCurrentYear] = useState(() => (new Date()).getFullYear());
-  const [vehicles, setVehicles] = useState<VehicleIdentified[]>([]);
-  const [trips, setTrips] = useState<TripIdentified[]>([]);
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
+  const [trips, setTrips] = useState<Trip[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const token = useCallback(async () => (await getToken()) ?? '', [getToken]);
+
+  const refreshVehicles = useCallback(async () => {
+    const t = await token();
+    const [state, vs] = await Promise.all([getUserState(t, userId), listVehicles(t)]);
+    setVehicles(vs);
+    const selected = state?.vehicleId && vs.some((v) => v.id === state.vehicleId)
+      ? state.vehicleId
+      : vs[0]?.id ?? null;
+    setCurrentVehicleId(selected);
+    return vs;
+  }, [token, userId]);
+
+  const refreshTrips = useCallback(async (vehicleId: string) => {
+    const t = await token();
+    return listTrips(t, vehicleId);
+  }, [token]);
 
   useEffect(() => {
-    setVehicles([]);
-    const unsubUser = onSnapshot(doc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
-      if (!snapshot.exists()) {
-        const { data: oldTrips } = (await getDoc(doc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
-        const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
-          return acc.add(cls);
-        }, new Set<string>()));
-        const name = prompt('車の名称を入力してください');
-        const batch1 = writeBatch(db);
-        const newVehicle = doc(collection(db, 'vehicles')).withConverter(vehicleConverter);
-        await batch1
-          .set(newVehicle, {
-            classes,
-            name: name || '',
-            permissions: {
-              read: [currentUser.uid],
-              write: [currentUser.uid],
-            },
-          })
-          .set(doc(db, 'users', currentUser.uid).withConverter(userConverter), {
-            state: { vehicle: newVehicle.id },
-          })
-          .commit();
-        const batch2 = writeBatch(db);
-        oldTrips.forEach((trip) => {
-          batch2.set(doc(collection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
-        });
-        batch2.commit();
-        return;
+    let active = true;
+    (async () => {
+      setLoading(true);
+      setLoadError(false);
+      try {
+        const vs = await refreshVehicles();
+        // 車両が無ければ App に通知（車両設定を自動で開く）
+        if (active && vs.length === 0) onNoVehicles();
+      } catch (e) {
+        // 詳細はコンソールへ、画面は固定文言（内部情報を露出しない）
+        console.error('Failed to load vehicles:', e);
+        if (active) setLoadError(true);
+      } finally {
+        if (active) setLoading(false);
       }
-      setCurrentVehicleId(snapshot.data().state.vehicle);
-    });
-    const unsubVehicles = onSnapshot(query(collection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ doc, type }) => {
-        setVehicles((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => doc.id === id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
-        });
-      });
-    });
+    })();
     return () => {
-      unsubUser();
-      unsubVehicles();
+      active = false;
     };
-  }, [currentUser]);
+  }, [refreshVehicles, refreshKey, onNoVehicles]);
 
   useEffect(() => {
-    setTrips([]);
-    if (!currentVehicleId) return;
-    const unsubVehicle = onSnapshot(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
-      setVehicleClasses(snapshot.data()?.classes || []);
-    });
-    const unsubTrips = onSnapshot(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ type, doc }) => {
-        setTrips((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => id === doc.id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
-        });
-      });
-    });
+    if (!currentVehicleId) {
+      setTrips([]);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const newTrips = await refreshTrips(currentVehicleId);
+        if (active) setTrips(newTrips);
+      } catch (e) {
+        console.error('Failed to load trips:', e);
+        if (active) setLoadError(true);
+      }
+    })();
     return () => {
-      unsubVehicle();
-      unsubTrips();
+      active = false;
     };
-  }, [currentVehicleId]);
+  }, [currentVehicleId, refreshTrips]);
+
+  const vehicleClasses = useMemo(
+    () => vehicles.find((v) => v.id === currentVehicleId)?.classes ?? [],
+    [vehicles, currentVehicleId],
+  );
 
   const calculatedTrips = useMemo<TripCalculated[]>(() => {
     const [first, ...remains] = [...trips].sort(sortByTimestamp);
     if (!first) return [];
-    return remains.reduce(([acc, odo]: [TripCalculated[], number], trip: TripIdentified): [TripCalculated[], number] => {
+    return remains.reduce(([acc, odo]: [TripCalculated[], number], trip: Trip): [TripCalculated[], number] => {
       acc.push({ ...trip, trip: trip.odo - odo });
       return [acc, trip.odo];
     }, [[{ ...first, trip: 0 }], first.odo] as [TripCalculated[], number])[0];
   }, [trips]);
 
   const classSummaries = useMemo(() => calculatedTrips.filter(({ timestamp }) => {
-    return timestamp.toDate().getFullYear() === currentYear;
+    return timestamp.getFullYear() === currentYear;
   }).reduce((acc, { class: c, trip }) => {
     if (!(c in acc)) acc[c] = 0;
     if (trip !== undefined) acc[c] += trip;
@@ -155,9 +140,9 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   }, {} as Record<string, number>), [calculatedTrips, currentYear]);
 
   const sum = useMemo(() => {
-    const last = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
-    let first = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear - 1);
-    if (!first) first = calculatedTrips.find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
+    const last = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.getFullYear() === currentYear);
+    let first = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.getFullYear() === currentYear - 1);
+    if (!first) first = calculatedTrips.find(({ timestamp }) => timestamp.getFullYear() === currentYear);
     if (!first || !last) return 0;
     return last.odo - first.odo;
   }, [calculatedTrips, currentYear]);
@@ -165,7 +150,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 一覧は新しい順に表示する（trip の差分計算は古い順のまま）
   const displayTrips = useMemo(() => [...calculatedTrips].reverse(), [calculatedTrips]);
 
-  // trips はスナップショット順で時系列とは限らないため、ODO（単調増加）の最大値を最新値とする
+  // trips は時系列とは限らないため、ODO（単調増加）の最大値を最新値とする
   const lastODO = useMemo(() => trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [trips]);
 
   function classStyle(cls: string) {
@@ -173,22 +158,74 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
   }
 
-  function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
-    updateDoc(doc(db, 'users', currentUser.uid), {
-      'state.vehicle': event.target.value,
-    });
+  async function handleSelectVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
+    const id = event.target.value;
+    try {
+      await setCurrentVehicleQuery(await token(), userId, id);
+      setCurrentVehicleId(id);
+    } catch (e) {
+      console.error('Failed to switch vehicle:', e);
+      alert('車両の切り替えに失敗しました');
+    }
+  }
+
+  async function retryLoad() {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      await refreshVehicles();
+    } catch (e) {
+      console.error('Failed to load vehicles:', e);
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
-  function createTrip(trip: Trip): string | null {
-    const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
-    const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.seconds < timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds < timestamp.nanoseconds);
+  async function handleCreateTrip(trip: { odo: number; class: string; timestamp: Date }): Promise<string | null> {
+    const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.getTime() > timestamp.getTime());
+    const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.getTime() < timestamp.getTime());
     if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
     if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
     if (!currentVehicleId) return '車両が選択されていません';
-    addDoc(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
+    try {
+      await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
+      setTrips(await refreshTrips(currentVehicleId));
+    } catch (e) {
+      console.error('Failed to add trip:', e);
+      return '記録の追加に失敗しました。時間をおいて再試行してください。';
+    }
     setNewTripEnabled(false);
     return null;
+  }
+
+  if (loading) {
+    return <Loader className="text-lime-500 text-4xl py-16" />;
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-6 text-sm text-gray-800 space-y-3 text-center">
+        <p className="text-red-700 font-bold">読み込みエラー</p>
+        <p>データの取得に失敗しました。時間をおいて再試行してください。</p>
+        <button
+          onClick={retryLoad}
+          className="bg-lime-500 text-white rounded-xl py-2 px-5 font-bold shadow active:bg-lime-600"
+        >
+          再試行
+        </button>
+      </div>
+    );
+  }
+
+  if (!vehicles.length) {
+    return (
+      <div className="text-center py-16 space-y-2 text-gray-500">
+        <p>まだ車両がありません。</p>
+        <p className="text-sm">設定（⚙）→ 車両設定 から追加してください。</p>
+      </div>
+    );
   }
 
   return (
@@ -198,7 +235,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         <label className="flex items-center gap-2 grow min-w-0">
           <span className="text-sm font-medium text-gray-500 shrink-0">車両</span>
           <select
-            onChange={setCurrentVehicle}
+            onChange={handleSelectVehicle}
             value={currentVehicleId ?? ''}
             className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
           >
@@ -291,7 +328,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           onClick={(e) => { if (e.target === e.currentTarget) setNewTripEnabled(false); }}
         >
           <div className="w-full bg-white rounded-b-2xl px-5 pb-4 max-h-full overflow-y-auto shadow-2xl" style={{ paddingTop: 'calc(0.5rem + env(safe-area-inset-top))' }}>
-            <NewTrip minOdo={lastODO} onSubmit={createTrip} onCancel={() => setNewTripEnabled(false)} classOptions={vehicleClasses} />
+            <NewTrip minOdo={lastODO} onSubmit={handleCreateTrip} onCancel={() => setNewTripEnabled(false)} classOptions={vehicleClasses} />
           </div>
         </div>
       )}

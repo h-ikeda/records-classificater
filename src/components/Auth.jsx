@@ -1,22 +1,14 @@
-import SignInWithGoogle from './SignInWithGoogle';
-import SignInWithTestEmailPassword from './SignInWithTestEmailPassword';
-import SignOut from './SignOut';
-import DeleteAccount from './DeleteAccount';
+import { SignInButton } from '@clerk/clerk-react';
 
-const dev = process.env.PROJECT_ID !== 'records-classificater';
-const local = process.env.NODE_ENV !== 'production';
-
-export default function Auth({ currentUser = null }) {
+// 認証は Clerk が提供するモーダルに委譲する。
+export default function Auth() {
   return (
-    <div className="flex gap-2 text-red-700">
-      {local && currentUser && <DeleteAccount currentUser={currentUser} />}
-      {currentUser ? (
-        <SignOut />
-      ) : dev ? (
-        <SignInWithTestEmailPassword />
-      ) : (
-        <SignInWithGoogle />
-      )}
+    <div className="flex gap-2">
+      <SignInButton mode="modal">
+        <button className="text-white font-medium px-3 py-1.5 rounded-lg border border-white/60 active:bg-lime-600">
+          サインイン
+        </button>
+      </SignInButton>
     </div>
   );
 }
