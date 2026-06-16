@@ -67,3 +67,10 @@ node_modules/
 
 /dist/
 /.parcel-cache
+
+# Vercel
+.vercel
+
+# Firebase emulator debug logs
+firestore-debug.log
+ui-debug.log

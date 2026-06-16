@@ -1,16 +1,11 @@
-import type { User } from 'firebase/auth';
-import { getAuth, signOut } from 'firebase/auth';
 import { useEffect, useState } from 'react';
-import DeleteAccount from './DeleteAccount';
-
-const local = process.env.NODE_ENV !== 'production';
 
 export default function SettingsMenu({
-  currentUser,
   onOpenVehicleSettings,
+  onOpenAccountSettings,
 }: {
-  currentUser: User,
-  onOpenVehicleSettings: () => void,
+  onOpenVehicleSettings: () => void;
+  onOpenAccountSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -24,9 +19,9 @@ export default function SettingsMenu({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
-  function handleVehicleSettings() {
+  function handle(action: () => void) {
     setOpen(false);
-    onOpenVehicleSettings();
+    action();
   }
 
   return (
@@ -57,7 +52,7 @@ export default function SettingsMenu({
             <button
               type="button"
               role="menuitem"
-              onClick={handleVehicleSettings}
+              onClick={() => handle(onOpenVehicleSettings)}
               className="w-full text-left px-4 py-2.5 text-sm active:bg-gray-100"
             >
               車両設定
@@ -65,16 +60,11 @@ export default function SettingsMenu({
             <button
               type="button"
               role="menuitem"
-              onClick={() => signOut(getAuth())}
-              className="w-full text-left px-4 py-2.5 text-sm text-red-700 active:bg-gray-100"
+              onClick={() => handle(onOpenAccountSettings)}
+              className="w-full text-left px-4 py-2.5 text-sm active:bg-gray-100"
             >
-              ログアウト
+              アカウント設定
             </button>
-            {local && (
-              <div className="border-t border-gray-100 mt-1 pt-1 px-4 py-1.5 text-sm text-red-700">
-                <DeleteAccount currentUser={currentUser} />
-              </div>
-            )}
           </div>
         </>
       )}

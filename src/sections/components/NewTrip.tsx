@@ -1,21 +1,34 @@
-import { Timestamp } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 
-function toLocalInputValue(d) {
-  const p = (n, len = 2) => String(n).padStart(len, '0');
+interface TripInput {
+  timestamp: Date;
+  odo: number;
+  class: string;
+}
+
+interface NewTripProps {
+  minOdo?: number;
+  classOptions?: string[];
+  onSubmit: (trip: TripInput) => string | null | Promise<string | null>;
+  onCancel: () => void;
+}
+
+function toLocalInputValue(d: Date) {
+  const p = (n: number, len = 2) => String(n).padStart(len, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCancel }) {
-  const odoInput = useRef(null);
+export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCancel }: NewTripProps) {
+  const odoInput = useRef<HTMLInputElement>(null);
   const [newODO, setNewODO] = useState(minOdo > 0 ? minOdo : 0);
-  const [newClass, setNewClass] = useState(classOptions[0]);
+  const [newClass, setNewClass] = useState<string | undefined>(classOptions[0]);
   // 既定値は現在時刻。必要に応じて入力欄で調整する。
   const [dateTimeLocal, setDateTimeLocal] = useState(() => toLocalInputValue(new Date()));
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setNewClass((prev) => (classOptions.includes(prev) ? prev : classOptions[0]));
+    setNewClass((prev) => (prev && classOptions.includes(prev) ? prev : classOptions[0]));
   }, [classOptions]);
 
   useEffect(() => {
@@ -26,7 +39,7 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
     odoInput.current?.focus();
   }, []);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     const date = new Date(dateTimeLocal);
     if (isNaN(date.getTime())) {
@@ -45,13 +58,21 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
       setError(`総走行距離 (ODO) は ${minOdo} km 以上で入力してください`);
       return;
     }
+    setSubmitting(true);
     // onSubmit は却下時に理由（文字列）を返す。成功時は null。
-    const rejection = onSubmit({
-      timestamp: Timestamp.fromDate(date),
-      odo: newODO,
-      class: newClass,
-    });
-    if (rejection) setError(rejection);
+    try {
+      const rejection = await onSubmit({
+        timestamp: date,
+        odo: newODO,
+        class: newClass,
+      });
+      if (rejection) setError(rejection);
+    } catch (e) {
+      console.error('Failed to submit trip:', e);
+      setError('送信中にエラーが発生しました');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -122,9 +143,10 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
         </button>
         <button
           type="submit"
-          className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600"
+          disabled={submitting}
+          className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600 disabled:opacity-60"
         >
-          記録する
+          {submitting ? '保存中…' : '記録する'}
         </button>
       </div>
     </form>

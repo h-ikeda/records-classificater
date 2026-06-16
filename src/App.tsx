@@ -1,27 +1,28 @@
-import type { User } from 'firebase/auth';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { useEffect, useState } from 'react';
+import { SignedIn, SignedOut, useUser } from '@clerk/clerk-react';
+import { useCallback, useRef, useState } from 'react';
 import Auth from './components/Auth';
 import SettingsMenu from './components/SettingsMenu';
 import TripClassificater from './sections/TripClassificater';
 import VehicleSettings from './sections/VehicleSettings';
+import AccountSettings from './sections/AccountSettings';
 import Loader from './components/Loader';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null | undefined>(undefined);
+  const { isLoaded, user } = useUser();
   const [vehicleSettingsOpen, setVehicleSettingsOpen] = useState(false);
-  const auth = getAuth();
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
+  // 車両設定での追加・更新を走行記録画面へ反映させるためのトリガー
+  const [refreshKey, setRefreshKey] = useState(0);
+  // 初回サインインで車両が無いとき、一度だけ車両設定を自動で開く
+  const autoOpened = useRef(false);
 
-  useEffect(() => onAuthStateChanged(auth, (user) => {
-    setCurrentUser(user);
-  }), [auth]);
+  const handleNoVehicles = useCallback(() => {
+    if (autoOpened.current) return;
+    autoOpened.current = true;
+    setVehicleSettingsOpen(true);
+  }, []);
 
-  // ログアウト時に車両設定モーダルを閉じ、再ログイン時の意図しない再表示を防ぐ
-  useEffect(() => {
-    if (!currentUser) setVehicleSettingsOpen(false);
-  }, [currentUser]);
-
-  if (currentUser === undefined) {
+  if (!isLoaded) {
     return <Loader className="fixed inset-0 bg-slate-100 text-green-300 text-5xl" />;
   }
 
@@ -32,16 +33,35 @@ export default function App() {
         style={{ paddingTop: 'calc(0.375rem + env(safe-area-inset-top))' }}
       >
         <h2 className="font-bold grow text-white">Trip classificater</h2>
-        {currentUser ? (
-          <SettingsMenu currentUser={currentUser} onOpenVehicleSettings={() => setVehicleSettingsOpen(true)} />
-        ) : (
-          <Auth currentUser={currentUser} />
-        )}
+        <SignedIn>
+          <SettingsMenu
+            onOpenVehicleSettings={() => setVehicleSettingsOpen(true)}
+            onOpenAccountSettings={() => setAccountSettingsOpen(true)}
+          />
+        </SignedIn>
+        <SignedOut>
+          <Auth />
+        </SignedOut>
       </nav>
-      {currentUser && <TripClassificater currentUser={currentUser} />}
-      {currentUser && vehicleSettingsOpen && (
-        <VehicleSettings currentUser={currentUser} onClose={() => setVehicleSettingsOpen(false)} />
-      )}
+      <SignedIn>
+        {user && (
+          <TripClassificater
+            userId={user.id}
+            refreshKey={refreshKey}
+            onNoVehicles={handleNoVehicles}
+          />
+        )}
+        {user && vehicleSettingsOpen && (
+          <VehicleSettings
+            userId={user.id}
+            onChanged={() => setRefreshKey((k) => k + 1)}
+            onClose={() => setVehicleSettingsOpen(false)}
+          />
+        )}
+        {user && accountSettingsOpen && (
+          <AccountSettings onClose={() => setAccountSettingsOpen(false)} />
+        )}
+      </SignedIn>
     </main>
   );
 }
