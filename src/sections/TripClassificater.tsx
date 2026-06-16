@@ -102,7 +102,13 @@ export default function TripClassificater({
       setTrips([]);
       return;
     }
-    refreshTrips(currentVehicleId);
+    (async () => {
+      try {
+        await refreshTrips(currentVehicleId);
+      } catch (e) {
+        console.error('Failed to load trips:', e);
+      }
+    })();
   }, [currentVehicleId, refreshTrips]);
 
   const vehicleClasses = useMemo(
