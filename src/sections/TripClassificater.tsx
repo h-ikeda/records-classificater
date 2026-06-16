@@ -166,21 +166,19 @@ export default function TripClassificater({
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
-  function handleCreateTrip(trip: { odo: number; class: string; timestamp: Date }): string | null {
+  async function handleCreateTrip(trip: { odo: number; class: string; timestamp: Date }): Promise<string | null> {
     const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.getTime() > timestamp.getTime());
     const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.getTime() < timestamp.getTime());
     if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
     if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
     if (!currentVehicleId) return '車両が選択されていません';
-    (async () => {
-      try {
-        await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
-        await refreshTrips(currentVehicleId);
-      } catch (e) {
-        console.error('Failed to add trip:', e);
-        alert('記録の追加に失敗しました。時間をおいて再度お試しください。');
-      }
-    })();
+    try {
+      await createTrip(await token(), { ...trip, vehicleId: currentVehicleId });
+      await refreshTrips(currentVehicleId);
+    } catch (e) {
+      console.error('Failed to add trip:', e);
+      return '記録の追加に失敗しました。時間をおいて再試行してください。';
+    }
     setNewTripEnabled(false);
     return null;
   }

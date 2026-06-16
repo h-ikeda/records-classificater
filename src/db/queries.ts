@@ -77,7 +77,7 @@ export async function listVehicles(token: string): Promise<Vehicle[]> {
 }
 
 export async function getVehicle(token: string, vehicleId: string): Promise<Vehicle | undefined> {
-  const rows = await dataApi<VehicleRow[]>(token, `/vehicles?id=eq.${vehicleId}`);
+  const rows = await dataApi<VehicleRow[]>(token, `/vehicles?id=eq.${encodeURIComponent(vehicleId)}`);
   return rows[0] ? toVehicle(rows[0]) : undefined;
 }
 
@@ -129,7 +129,7 @@ export async function shareVehicle(
 export async function listTrips(token: string, vehicleId: string): Promise<Trip[]> {
   const rows = await dataApi<TripRow[]>(
     token,
-    `/trips?vehicle_id=eq.${vehicleId}&order=timestamp.asc`,
+    `/trips?vehicle_id=eq.${encodeURIComponent(vehicleId)}&order=timestamp.asc`,
   );
   return rows.map(toTrip);
 }
@@ -148,7 +148,7 @@ export async function createTrip(token: string, trip: NewTrip): Promise<void> {
 }
 
 export async function deleteTrip(token: string, vehicleId: string, tripId: string): Promise<void> {
-  await dataApi(token, `/trips?id=eq.${tripId}&vehicle_id=eq.${vehicleId}`, {
+  await dataApi(token, `/trips?id=eq.${encodeURIComponent(tripId)}&vehicle_id=eq.${encodeURIComponent(vehicleId)}`, {
     method: 'DELETE',
     prefer: 'return=minimal',
   });

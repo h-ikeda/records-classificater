@@ -144,12 +144,15 @@ export async function readFirestore(firestore: Firestore): Promise<FirestoreSnap
 /**
  * 変換済みの行を Postgres へ投入する。FK 制約を満たすため vehicles を先に入れる。
  * 移行はテーブル所有者ロールで実行する想定（RLS はバイパスされる）。
+ * 途中失敗時の部分書き込みを防ぐため、1 トランザクションで実行する。
  */
 export async function writeRows(db: MigrationDb, rows: MigrationRows): Promise<void> {
-  if (rows.vehicles.length) await db.insert(vehicles).values(rows.vehicles);
-  if (rows.members.length) await db.insert(vehicleMembers).values(rows.members);
-  if (rows.trips.length) await db.insert(trips).values(rows.trips);
-  if (rows.userStates.length) await db.insert(userStates).values(rows.userStates);
+  await db.transaction(async (tx) => {
+    if (rows.vehicles.length) await tx.insert(vehicles).values(rows.vehicles);
+    if (rows.members.length) await tx.insert(vehicleMembers).values(rows.members);
+    if (rows.trips.length) await tx.insert(trips).values(rows.trips);
+    if (rows.userStates.length) await tx.insert(userStates).values(rows.userStates);
+  });
 }
 
 /**

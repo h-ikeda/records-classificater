@@ -38,6 +38,10 @@ async function assertRlsPrerequisites(connectionString) {
 
 // このデプロイ環境のブランチへマイグレーションを適用（所有者接続を使用）
 if (unpooled) {
+  if (!pooled) {
+    console.error('DATABASE_URL が未設定です（DATABASE_URL_UNPOOLED は設定されています）。');
+    process.exit(1);
+  }
   await assertRlsPrerequisites(pooled);
   execSync('npm run db:migrate', {
     stdio: 'inherit',
@@ -65,9 +69,21 @@ if (!dataApiUrl && pooled) {
   }
 }
 
+if (!dataApiUrl) {
+  console.error(
+    [
+      '',
+      '✗ NEXT_PUBLIC_NEON_DATA_API_URL を解決できませんでした。',
+      '  DATABASE_URL が設定されているか、または NEXT_PUBLIC_NEON_DATA_API_URL を明示してください。',
+      '',
+    ].join('\n'),
+  );
+  process.exit(1);
+}
+
 // Parcel ビルド。NEXT_PUBLIC_* は process.env からそのまま埋め込まれる。
 execSync('parcel build', {
   stdio: 'inherit',
-  env: { ...process.env, NEXT_PUBLIC_NEON_DATA_API_URL: dataApiUrl ?? '' },
+  env: { ...process.env, NEXT_PUBLIC_NEON_DATA_API_URL: dataApiUrl },
 });
 

@@ -181,9 +181,9 @@ export default function VehicleSettings({
                       <option key={id} value={id}>{name}</option>
                     ))}
                   </select>
-                ) : (
+                ) : !error ? (
                   <p className="text-sm text-gray-500 py-2">車両がありません。下のボタンから追加してください。</p>
-                )}
+                ) : null}
               </label>
               <button
                 type="button"
