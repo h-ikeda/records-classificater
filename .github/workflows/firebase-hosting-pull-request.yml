@@ -12,12 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - run: npm ci && npm run build
-      - uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
-          projectId: records-classificater-test
+      # Hosting より先にルールを反映する。逆順だと、新しいルールを前提にした
+      # フロントエンドが公開されてからルールが適用されるまでの間に失敗窓ができる。
       - name: Deploy Firestore rules
         run: |
           npm i -g firebase-tools
@@ -26,6 +22,12 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
           GOOGLE_APPLICATION_CREDENTIALS: '${{ runner.temp }}/firebase-service-account.json'
+      - run: npm ci && npm run build
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
+          projectId: records-classificater-test
   test:
     runs-on: ubuntu-latest
     steps:
