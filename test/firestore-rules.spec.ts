@@ -175,6 +175,38 @@ describe('Firestore security rules', () => {
             write: [user],
           },
         })),
+        assertSucceeds(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          classes: ['Case1', 'Case2', 'Case3'],
+          name: 'ゴルフ',
+          model: 'golf7',
+          permissions: {
+            write: [user],
+            read: [user],
+          },
+        })),
+      ]);
+    });
+    test('new vehicle with a model not in the allowed list should be denied', async () => {
+      const user = crypto.randomUUID().replace('-', '');
+      await Promise.all([
+        assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
+          model: 'unknown-model',
+          permissions: {
+            write: [user],
+            read: [user],
+          },
+        })),
+        assertFails(addDoc(collection(env.authenticatedContext(user).firestore(), 'vehicles'), {
+          classes: ['Case1', 'Case2', 'Case3'],
+          name: 'フィット',
+          model: 123,
+          permissions: {
+            write: [user],
+            read: [user],
+          },
+        })),
       ]);
     });
     test('new vehicle without correct fields should be denied', async () => {
@@ -308,6 +340,64 @@ describe('Firestore security rules', () => {
       await assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(), 'vehicles', vid), {
         name: 'カムリ',
       }));
+    });
+
+    describe('updating the model field', () => {
+      let modelVid: string;
+      beforeEach(async () => {
+        await env.withSecurityRulesDisabled(async (ctx) => {
+          ({ id: modelVid } = await addDoc(collection(ctx.firestore(), 'vehicles'), {
+            permissions: {
+              read: [uid, readOnlyUid],
+              write: [uid, writeOnlyUid],
+            },
+            classes: ['Business'],
+            name: 'プリウス',
+          }));
+        });
+      });
+      test('a write permitted user can set an allowed model', async () => {
+        await assertSucceeds(updateDoc(doc(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', modelVid), {
+          model: 'n-one',
+        }));
+      });
+      test('a model not in the allowed list should be denied', async () => {
+        await Promise.all([
+          assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+            model: 'unknown-model',
+          })),
+          assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+            model: 123,
+          })),
+        ]);
+      });
+      test('a write permitted user can set the model along with other editable fields', async () => {
+        await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+          name: '別名',
+        }));
+      });
+      test('model is optional and can be removed', async () => {
+        await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: deleteField(),
+        }));
+      });
+      test('unapproved fields alongside model should be denied', async () => {
+        await assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+          unapproved: 'value',
+        }));
+      });
+      test('a read only user cannot update the model', async () => {
+        await assertFails(updateDoc(doc(env.authenticatedContext(readOnlyUid).firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+        }));
+      });
+      test('an unauthenticated user cannot update the model', async () => {
+        await assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+        }));
+      });
     });
 
     describe('in trips collection', () => {

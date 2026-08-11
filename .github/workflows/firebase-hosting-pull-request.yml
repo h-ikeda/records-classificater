@@ -12,6 +12,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      # Hosting より先にルールを反映する。逆順だと、新しいルールを前提にした
+      # フロントエンドが公開されてからルールが適用されるまでの間に失敗窓ができる。
+      - name: Deploy Firestore rules
+        run: |
+          npm i -g firebase-tools
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
+          # 権限エラーの調査用。どのプリンシパルにロールを付ければよいかを
+          # ログから特定できるようにする。メールアドレスは識別子であって
+          # 資格情報ではないため出力して差し支えない。
+          node -e 'console.log("deploying as:", require(process.env.GOOGLE_APPLICATION_CREDENTIALS).client_email)'
+          # firebase-tools はデプロイ前に serviceusage.googleapis.com へ
+          # 「Firestore API が有効か」を問い合わせる。これには
+          # serviceusage.services.get / use が必要だが、ルールの反映に本来
+          # 必要なのは firebaserules の権限だけなので、デプロイ用の
+          # サービスアカウントに serviceusage を持たせずに済ませたい。
+          # この問い合わせは configstore にキャッシュがあれば省略される
+          # (lib/ensureApiEnabled.js の checkAPIEnablementCache) ため、
+          # 「有効」と記録しておいて問い合わせ自体を発生させない。
+          # firebase-tools 側の実装が変わってキャッシュが効かなくなった
+          # 場合は、この step が 403 で落ちるだけで、ルールが未反映のまま
+          # Hosting が公開されることはない。
+          config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/configstore"
+          mkdir -p "$config_dir"
+          printf '{"apiEnablementCache":{"%s":{"firestore.googleapis.com":true}}}' \
+            "$FIREBASE_PROJECT" > "$config_dir/firebase-tools.json"
+          chmod 600 "$config_dir/firebase-tools.json"
+          firebase deploy --only firestore:rules --project "$FIREBASE_PROJECT"
+        env:
+          FIREBASE_PROJECT: records-classificater-test
+          FIREBASE_SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER_TEST }}'
+          GOOGLE_APPLICATION_CREDENTIALS: '${{ runner.temp }}/firebase-service-account.json'
       - run: npm ci && npm run build
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:

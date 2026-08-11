@@ -2,6 +2,7 @@ import type { User } from 'firebase/auth';
 import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
+import VehicleSelector from './components/VehicleSelector';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
@@ -173,10 +174,22 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
   }
 
-  function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
-    updateDoc(doc(db, 'users', currentUser.uid), {
-      'state.vehicle': event.target.value,
-    });
+  async function setCurrentVehicle(vehicleId: string) {
+    try {
+      await updateDoc(doc(db, 'users', currentUser.uid), {
+        'state.vehicle': vehicleId,
+      });
+    } catch (error) {
+      console.error('Failed to update current vehicle', error);
+    }
+  }
+
+  async function updateVehicleModel(vehicleId: string, model: string) {
+    try {
+      await updateDoc(doc(db, 'vehicles', vehicleId), { model });
+    } catch (error) {
+      console.error('Failed to update vehicle model', error);
+    }
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
@@ -195,18 +208,12 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     <>
       {/* 車両切り替え（利用頻度が高いので常に上部に固定） */}
       <section className="sticky top-0 z-20 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center gap-3">
-        <label className="flex items-center gap-2 grow min-w-0">
-          <span className="text-sm font-medium text-gray-500 shrink-0">車両</span>
-          <select
-            onChange={setCurrentVehicle}
-            value={currentVehicleId ?? ''}
-            className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
-          >
-            {vehicles.map(({ id, name }) => (
-              <option key={id} value={id}>{name}</option>
-            ))}
-          </select>
-        </label>
+        <VehicleSelector
+          vehicles={vehicles}
+          currentVehicleId={currentVehicleId}
+          onSelect={setCurrentVehicle}
+          onUpdateModel={updateVehicleModel}
+        />
       </section>
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
