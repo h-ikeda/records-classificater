@@ -1,11 +1,8 @@
-export default process.env.PROJECT_ID !== 'records-classificater' ? {
-  apiKey: "AIzaSyCdEu_wJyhSKJZgIDSZOZPP3NIor-wZrSQ",
-  authDomain: "records-classificater-test.web.app",
-  projectId: "records-classificater-test",
-  storageBucket: "records-classificater-test.appspot.com",
-  messagingSenderId: "621218742775",
-  appId: "1:621218742775:web:7b9443d921b7acd58aeef2",
-} : {
+// 本番・PR プレビュー・ローカル開発すべてが同じ Firebase プロジェクトを使う。
+// プレビューは Hosting のチャンネル pr-<番号> に載り、データは Firestore の
+// preview-channels/pr-<番号>/ 配下へ分離される（README「PR プレビュー」参照）。
+// ローカル開発はエミュレータへ接続するため、この設定の実体には触れない。
+export default {
   apiKey: "AIzaSyA67VdxczWRf5omaZzEBpL0ARAVD8rKQmk",
   authDomain: "records-classificater.web.app",
   projectId: "records-classificater",

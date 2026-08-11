@@ -1,7 +1,8 @@
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, query, collection, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 import NewTrip from './components/NewTrip';
+import { channelCollection, channelDoc } from '../firestore/channel';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
@@ -54,15 +55,15 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
 
   useEffect(() => {
     setVehicles([]);
-    const unsubUser = onSnapshot(doc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
+    const unsubUser = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
       if (!snapshot.exists()) {
-        const { data: oldTrips } = (await getDoc(doc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
+        const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
         const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
           return acc.add(cls);
         }, new Set<string>()));
         const name = prompt('車の名称を入力してください');
         const batch1 = writeBatch(db);
-        const newVehicle = doc(collection(db, 'vehicles')).withConverter(vehicleConverter);
+        const newVehicle = doc(channelCollection(db, 'vehicles')).withConverter(vehicleConverter);
         await batch1
           .set(newVehicle, {
             classes,
@@ -72,20 +73,20 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
               write: [currentUser.uid],
             },
           })
-          .set(doc(db, 'users', currentUser.uid).withConverter(userConverter), {
+          .set(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), {
             state: { vehicle: newVehicle.id },
           })
           .commit();
         const batch2 = writeBatch(db);
         oldTrips.forEach((trip) => {
-          batch2.set(doc(collection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
+          batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
         });
         batch2.commit();
         return;
       }
       setCurrentVehicleId(snapshot.data().state.vehicle);
     });
-    const unsubVehicles = onSnapshot(query(collection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
+    const unsubVehicles = onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
       snapshot.docChanges().forEach(({ doc, type }) => {
         setVehicles((prev) => {
           if (type === 'added') {
@@ -111,10 +112,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   useEffect(() => {
     setTrips([]);
     if (!currentVehicleId) return;
-    const unsubVehicle = onSnapshot(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+    const unsubVehicle = onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
       setVehicleClasses(snapshot.data()?.classes || []);
     });
-    const unsubTrips = onSnapshot(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
+    const unsubTrips = onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
       snapshot.docChanges().forEach(({ type, doc }) => {
         setTrips((prev) => {
           if (type === 'added') {
@@ -174,7 +175,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   }
 
   function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
-    updateDoc(doc(db, 'users', currentUser.uid), {
+    updateDoc(channelDoc(db, 'users', currentUser.uid), {
       'state.vehicle': event.target.value,
     });
   }
@@ -186,7 +187,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
     if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
     if (!currentVehicleId) return '車両が選択されていません';
-    addDoc(collection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
+    addDoc(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
     setNewTripEnabled(false);
     return null;
   }

@@ -1,0 +1,116 @@
+name: Preview cleanup
+
+# PR クローズ時に、preview.yml が作ったプレビューを丸ごと片付ける。
+#
+#   Hosting   : プレビューチャンネル pr-<番号>
+#   Auth      : 承認済みドメインに足したプレビュー URL
+#   Firestore : preview-channels/pr-<番号> 配下
+#
+# 削除対象はいずれも pr-<番号> という命名に閉じている。本番のデータは
+# コレクションのルート直下にあり、このワークフローがどう壊れても届かない。
+#
+# デプロイ側（preview.yml）とはトリガーを分けている。同じワークフローに入れて
+# if で振り分けると、push のたびに削除ジョブが「スキップ」としてチェック一覧に
+# 出てしまうため。
+#
+# 各ステップは「もともと無い」と「消せなかった」を区別する。前者（既に失効・
+# 削除済み）は正常として続行し、後者（権限不足など）はジョブを失敗させる。
+# 一律に握り潰すと、恒久的な失敗に誰も気付かないままゴミが溜まり続ける。
+# 「もともと無い」を正常扱いにしたことでこのワークフローは冪等なので、途中で
+# 失敗しても原因を直して再実行すれば残りが片付く。
+
+on:
+  pull_request:
+    types: [closed]
+
+# preview.yml と同じグループ。PR クローズ時に、まだ走っているデプロイを打ち切る。
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  cleanup-preview:
+    name: Delete preview environment
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      PROJECT_ID: records-classificater
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Delete Hosting channel
+        # チャンネルは最終デプロイから 7 日で自動失効するため、クローズ時点で
+        # 既に無いことが普通にある。
+        run: |
+          if out="$(npx firebase-tools@latest hosting:channel:delete "pr-$PR" \
+              --project "$PROJECT_ID" --force 2>&1)"; then
+            echo "$out"
+          elif grep -qiE '404|not found|does not exist' <<<"$out"; then
+            echo "$out"
+            echo "チャンネル pr-$PR は既にありません（失効済みなど。正常）"
+          else
+            echo "$out"
+            echo "::error::Hosting チャンネル pr-$PR を削除できませんでした"
+            exit 1
+          fi
+      - name: Remove the preview URL from the authorized domains
+        # 消すのは「--pr-<番号>-」を含むホストだけ。PR 番号の後ろの区切りまで
+        # 見ているので、pr-1 の後片付けが pr-12 を巻き込むことはない。
+        #
+        # preview.yml と同じく、この API は配列を全置換する。取得できたことと、
+        # 消えたのが目的のホストだけであることを確かめてから書く。
+        run: |
+          api="https://identitytoolkit.googleapis.com/admin/v2/projects/$PROJECT_ID/config"
+          token="$(gcloud auth print-access-token)"
+          before="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          if [ "$(jq '.authorizedDomains | length' <<<"$before")" -eq 0 ]; then
+            echo "::error::承認済みドメインの一覧を取得できませんでした"
+            exit 1
+          fi
+          targets="$(jq -r --arg pat "--pr-$PR-" '.authorizedDomains[] | select(contains($pat))' <<<"$before")"
+          if [ -z "$targets" ]; then
+            echo "pr-$PR のプレビュー URL は承認済みドメインにありません（正常）"
+            exit 0
+          fi
+          curl -sS --fail-with-body -X PATCH \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            "$api?updateMask=authorizedDomains" \
+            -d "$(jq --arg pat "--pr-$PR-" '{authorizedDomains: [.authorizedDomains[] | select(contains($pat) | not)]}' <<<"$before")" \
+            > /dev/null
+          after="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          remaining="$(jq -r --arg pat "--pr-$PR-" '[.authorizedDomains[] | select(contains($pat))] | join(", ")' <<<"$after")"
+          if [ -n "$remaining" ]; then
+            echo "::error::承認済みドメインから削除できませんでした: $remaining"
+            exit 1
+          fi
+          lost="$(jq -r --argjson b "$(jq --arg pat "--pr-$PR-" '[.authorizedDomains[] | select(contains($pat) | not)]' <<<"$before")" \
+            '$b - .authorizedDomains | join(", ")' <<<"$after")"
+          if [ -n "$lost" ]; then
+            echo "::error::消すつもりのないドメインまで消えました（要復旧）: $lost"
+            exit 1
+          fi
+          echo "承認済みドメインから削除しました: $(tr '\n' ' ' <<<"$targets")"
+      - name: Delete preview data in Firestore
+        # ドキュメントを消してもサブコレクションは消えないため再帰削除する。
+        #
+        # ここだけ「もともと無い」の判定が要らない。--recursive 指定時、
+        # firestore:delete は対象が無くても終了コード 0 で終わる（削除対象が
+        # 0 件なら何もせず完了する）。一方、権限不足はコレクションの列挙に
+        # 失敗して非ゼロになる。つまり非ゼロは常に本物の失敗であり、そのまま
+        # ジョブを落としてよい。
+        run: |
+          npx firebase-tools@latest firestore:delete "preview-channels/pr-$PR" \
+            --recursive \
+            --force \
+            --project "$PROJECT_ID"

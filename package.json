@@ -22,9 +22,8 @@
   "scripts": {
     "start": "firebase emulators:exec --only=auth,firestore parcel",
     "build": "parcel build",
-    "deploy:rules": "firebase deploy --only firestore:rules",
-    "deploy:rules:prod": "firebase --project records-classificater deploy --only firestore:rules",
-    "test": "firebase emulators:exec jest"
+    "deploy:rules": "firebase --project records-classificater deploy --only firestore:rules",
+    "test": "firebase --project demo-records-classificater emulators:exec jest"
   },
   "source": "src/index.html"
 }

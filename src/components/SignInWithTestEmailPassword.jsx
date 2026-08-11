@@ -1,5 +1,6 @@
 import { createUserWithEmailAndPassword, getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, addDoc, Timestamp, collection } from 'firebase/firestore';
+import { getFirestore, setDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { channelCollection, channelDoc } from '../firestore/channel';
 
 function signIn() {
   // initializeApp 後に評価されるよう、Auth は呼び出し時に取得する
@@ -8,7 +9,7 @@ function signIn() {
     if (code !== 'auth/user-not-found') return;
     const { user } = await createUserWithEmailAndPassword(auth, 'abc@example.com', 'abcd1234');
     const now = Date.now();
-    setDoc(doc(getFirestore(), 'trips', user.uid), {
+    setDoc(channelDoc(getFirestore(), 'trips', user.uid), {
       data: [{
         class: 'Private',
         odo: 140,
@@ -39,7 +40,7 @@ function signIn() {
         timestamp: Timestamp.fromMillis(now),
       }],
     });
-    addDoc(collection(getFirestore(), 'vehicles'), {
+    addDoc(channelCollection(getFirestore(), 'vehicles'), {
       name: '他人のテスト車両',
       classes: ['太郎', '花子'],
       permissions: {

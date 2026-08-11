@@ -1,0 +1,204 @@
+name: Preview
+
+# PR ごとのプレビューを、本番と同じ Firebase プロジェクトの中に作る。
+#
+#   Hosting   : プレビューチャンネル pr-<番号>
+#   Firestore : preview-channels/pr-<番号>/ 配下（同じ DB の中でパスを分ける）
+#   Auth      : 本番と共通（同じプロジェクトなので分けられない）
+#
+# 以前はプレビューだけを別プロジェクト（records-classificater-test）へ出して
+# いましたが、プロジェクトが 2 つあると鍵・ルール・Auth の設定が二重管理になり、
+# 「テスト側だけ古い」がそのまま「プレビューだけ挙動が違う」になっていました。
+# 分けたいのは本番の *データ* なので、プロジェクトは 1 つに寄せ、データだけを
+# チャンネル（パス）で分けています（README「チャンネル」参照）。
+#
+# 分離されるのは Hosting とデータです。**ログインは本番と同じ Google
+# アカウント** で、プレビューで作ったデータは preview-channels 配下にのみ
+# 書かれます。本番のコレクションには届きません。
+#
+# PR クローズ時の後片付けは preview-cleanup.yml に分けてあります（同じ
+# ワークフローに入れると、クローズ以外のイベントのたびに削除ジョブが
+# 「スキップ」としてチェック一覧に並んでしまうため）。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# 同じ PR への連続 push は最後のものだけデプロイされればよい。
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    name: Preview environment
+    # フォークからの PR にはシークレットが渡らない（＝どうせ失敗する）うえ、
+    # 出す先は本番プロジェクトなので、同一リポジトリからの PR に限る。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      PROJECT_ID: records-classificater
+    steps:
+      - name: Check required secrets
+        # 未設定のシークレットは空文字として展開される。認証だけが後段で失敗
+        # すると原因が分かりにくいので、名前を挙げて先に落とす。
+        env:
+          SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then
+            echo "::error::シークレット FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER が未設定です（README「PR プレビュー」参照）"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build for the preview channel
+        # PREVIEW_CHANNEL はビルド時に Parcel が埋め込む。これが読み書き先を
+        # preview-channels/pr-<番号>/ へ振り替える唯一のスイッチ。
+        env:
+          PREVIEW_CHANNEL: pr-${{ github.event.pull_request.number }}
+        run: |
+          npm ci
+          npm run build
+      - name: Check that the channel is baked into the bundle
+        # 渡し忘れ・変数名の取り違えは、ビルドもデプロイも成功したまま
+        # 「プレビューが本番データを読み書きする」という形で表に出る。
+        # 出す前にここで確かめる（.map ではなく実際に配信される JS を見る）。
+        run: |
+          if ! grep -l "preview-channels" dist/*.js >/dev/null 2>&1 \
+            || ! grep -l "pr-$PR" dist/*.js >/dev/null 2>&1; then
+            echo "::error::ビルド成果物にチャンネル pr-$PR が埋め込まれていません（PREVIEW_CHANNEL の渡し漏れ）"
+            exit 1
+          fi
+          echo "チャンネル pr-$PR がバンドルに埋め込まれています"
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Deploy to preview channel
+        id: deploy
+        run: |
+          npx firebase-tools@latest hosting:channel:deploy "pr-$PR" \
+            --project "$PROJECT_ID" \
+            --expires 7d \
+            --non-interactive \
+            --json > channel.json
+          echo "url=$(jq -r '.result | to_entries[0].value.url' channel.json)" >> "$GITHUB_OUTPUT"
+      - name: Authorize the preview URL for Firebase Auth
+        # プレビュー URL は本番とは別のホスト名になるため、承認済みドメインに
+        # 入れておかないと Google ログインが弾かれる。チャンネル URL の
+        # ハッシュはチャンネル名から決まる（push しても変わらない）ので、
+        # 追加は PR につき一度で済む。削除は preview-cleanup.yml が行う。
+        #
+        # この API は配列を渡すと **全置換** する。取得に失敗したり空が返って
+        # きたりしたときにそのまま PATCH すると、本番のドメインごと消える。
+        # 取得できたことを確かめてから追加し、書いたあとに「消えたものが無い」
+        # ことまで確認する。
+        env:
+          URL: '${{ steps.deploy.outputs.url }}'
+        run: |
+          host="${URL#https://}"
+          host="${host%%/*}"
+          case "$host" in
+            ''|*[!a-zA-Z0-9.-]*)
+              echo "::error::プレビュー URL からホスト名を取り出せませんでした: $URL"
+              exit 1
+              ;;
+          esac
+          api="https://identitytoolkit.googleapis.com/admin/v2/projects/$PROJECT_ID/config"
+          token="$(gcloud auth print-access-token)"
+          before="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          if [ "$(jq '.authorizedDomains | length' <<<"$before")" -eq 0 ]; then
+            echo "::error::承認済みドメインの一覧を取得できませんでした（本番のドメインを消さないよう中断します）"
+            exit 1
+          fi
+          if jq -e --arg h "$host" '.authorizedDomains | index($h)' <<<"$before" >/dev/null; then
+            echo "$host は既に承認済みドメインに入っています"
+            exit 0
+          fi
+          curl -sS --fail-with-body -X PATCH \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            "$api?updateMask=authorizedDomains" \
+            -d "$(jq --arg h "$host" '{authorizedDomains: (.authorizedDomains + [$h])}' <<<"$before")" \
+            > /dev/null
+          after="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          if ! jq -e --arg h "$host" '.authorizedDomains | index($h)' <<<"$after" >/dev/null; then
+            echo "::error::$host を承認済みドメインに追加できませんでした"
+            exit 1
+          fi
+          lost="$(jq -r --argjson b "$(jq '.authorizedDomains' <<<"$before")" '$b - .authorizedDomains | join(", ")' <<<"$after")"
+          if [ -n "$lost" ]; then
+            echo "::error::承認済みドメインから消えたものがあります（要復旧）: $lost"
+            exit 1
+          fi
+          echo "承認済みドメインに $host を追加しました"
+      - name: Check that the preview URL is reachable
+        # デプロイの成否だけでなく、URL が実際に開けることを毎回確かめる。
+        # ここを省くと、URL を貼られた人が最初の失敗を踏むことになる。
+        env:
+          URL: '${{ steps.deploy.outputs.url }}'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)"
+            if [ "$code" = "200" ]; then
+              echo "疎通確認 OK: $URL"
+              exit 0
+            fi
+            echo "試行 $attempt: HTTP $code（チャンネルの反映待ちの可能性あり）"
+            sleep 10
+          done
+          echo "::error::プレビュー URL が開けません（最後の応答: HTTP $code）。$URL"
+          exit 1
+      - name: Comment preview URL on PR
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = '<!-- firebase-hosting-preview -->';
+            const body = [
+              marker,
+              '🔍 **プレビューデプロイ**: ${{ steps.deploy.outputs.url }}',
+              '',
+              '- コミット: ${{ github.event.pull_request.head.sha }}',
+              '- チャンネル: `pr-${{ env.PR }}`（最終デプロイから 7 日で失効、push ごとに更新）',
+              '- データ: Firestore `preview-channels/pr-${{ env.PR }}/…`（本番と分離。空の状態から始まります）',
+              '- ログインは **本番と同じ Google アカウント** です（同じ Firebase プロジェクトのため）。',
+              '',
+              'この URL での操作は `preview-channels/pr-${{ env.PR }}` 配下にのみ書き込まれ、本番のデータには影響しません。PR クローズ時にまとめて削除されます。',
+              '',
+              '> Firestore のセキュリティルールはプロジェクト共通です。この PR でルールを変更している場合、その変更はマージされるまでプレビューには反映されません。',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

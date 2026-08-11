@@ -2,57 +2,147 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // 本番のコレクションはルート直下に、PR プレビューのコレクションは
+    // preview-channels/pr-<番号>/ 配下に、同じ形で並ぶ（README「チャンネル」参照）。
+    // ルールはプロジェクト単位で 1 つなので、両方をここで面倒みる。
+    //
+    // 判定条件は関数にまとめ、二重に書くのは match の入れ子だけにしてある。
+    // 条件そのものを二度書くと、片方だけ直したときに「プレビューでだけ通る／
+    // 落ちる」という追いにくい差になるため。テスト（test/firestore-rules.spec.ts）
+    // は同じケースを本番パスとプレビューパスの両方に流して、差が出ないことを
+    // 確かめている。
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSignedInAs(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // プレビューのチャンネル名は PR 番号から決まる。この形以外を弾いておかないと、
+    // preview-channels 配下に後片付け（preview-cleanup.yml が消すのは
+    // preview-channels/pr-<番号> だけ）の届かないデータを作れてしまう。
+    function isPreviewChannel(channel) {
+      return channel.matches('^pr-[0-9]+$');
+    }
+
+    function isValidNewUser(incoming) {
+      return incoming.keys().hasAll(['state'])
+        && incoming.keys().hasOnly(['state'])
+        && incoming.state is map
+        && incoming.state.keys().hasAll(['vehicle'])
+        && incoming.state.keys().hasOnly(['vehicle'])
+        && incoming.state.vehicle is string;
+    }
+
+    function isValidUserUpdate(incoming, current) {
+      return incoming.diff(current).affectedKeys().hasOnly(['state'])
+        && incoming.state.diff(current.state).affectedKeys().hasOnly(['vehicle'])
+        && incoming.state.vehicle is string;
+    }
+
+    function hasValidVehicleFields(incoming) {
+      return incoming.classes is list
+        && incoming.permissions is map
+        && incoming.name is string
+        && incoming.permissions.keys().hasOnly(['write', 'read'])
+        && (!incoming.permissions.keys().hasAll(['write']) || incoming.permissions.write is list)
+        && (!incoming.permissions.keys().hasAll(['read']) || incoming.permissions.read is list);
+    }
+
+    function isValidNewVehicle(incoming) {
+      return incoming.keys().hasAll(['permissions', 'classes', 'name'])
+        && incoming.keys().hasOnly(['permissions', 'classes', 'name'])
+        && hasValidVehicleFields(incoming);
+    }
+
+    function isValidVehicleUpdate(incoming, current) {
+      return incoming.diff(current).affectedKeys().hasOnly(['name', 'classes', 'permissions'])
+        && hasValidVehicleFields(incoming);
+    }
+
+    function canReadVehicle(vehicle) {
+      return isSignedIn() && request.auth.uid in get(vehicle).data.permissions.read;
+    }
+
+    function canWriteVehicle(vehicle) {
+      return isSignedIn() && request.auth.uid in get(vehicle).data.permissions.write;
+    }
+
+    function isValidNewTrip(vehicle, incoming) {
+      return incoming.class in get(vehicle).data.classes;
+    }
+
+    // ---- 本番（ルート直下） ----
+
     match /trips/{uid} {
-      allow read, write: if request.auth != null
-        && request.auth.uid == uid;
+      allow read, write: if isSignedInAs(uid);
     }
 
     match /users/{uid} {
-      allow get: if request.auth != null
-        && request.auth.uid == uid;
-      allow create: if request.auth != null
-        && request.auth.uid == uid
-        && request.resource.data.keys().hasAll(['state'])
-        && request.resource.data.keys().hasOnly(['state'])
-        && request.resource.data.state is map
-        && request.resource.data.state.keys().hasAll(['vehicle'])
-        && request.resource.data.state.keys().hasOnly(['vehicle'])
-        && request.resource.data.state.vehicle is string;
-      allow update: if request.auth != null
-        && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['state'])
-        && request.resource.data.state.diff(resource.data.state).affectedKeys().hasOnly(['vehicle'])
-        && request.resource.data.state.vehicle is string;
+      allow get: if isSignedInAs(uid);
+      allow create: if isSignedInAs(uid)
+        && isValidNewUser(request.resource.data);
+      allow update: if isSignedInAs(uid)
+        && isValidUserUpdate(request.resource.data, resource.data);
     }
 
     match /vehicles/{vid} {
-      allow create: if request.auth != null
-        && request.resource.data.keys().hasAll(['permissions', 'classes', 'name'])
-        && request.resource.data.keys().hasOnly(['permissions', 'classes', 'name'])
-        && request.resource.data.classes is list
-        && request.resource.data.permissions is map
-        && request.resource.data.name is string
-        && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
-        && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
-        && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
-      allow list, get: if request.auth != null
+      allow create: if isSignedIn()
+        && isValidNewVehicle(request.resource.data);
+      allow list, get: if isSignedIn()
         && request.auth.uid in resource.data.permissions.read;
-      allow update: if request.auth != null
+      allow update: if isSignedIn()
         && request.auth.uid in resource.data.permissions.write
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'classes', 'permissions'])
-        && request.resource.data.classes is list
-        && request.resource.data.name is string
-        && request.resource.data.permissions is map
-        && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
-        && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
-        && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
+        && isValidVehicleUpdate(request.resource.data, resource.data);
 
       match /trips/{tid} {
-        allow get, list: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.read;
-        allow create: if request.auth != null
-          && request.auth.uid in get(/databases/$(database)/documents/vehicles/$(vid)).data.permissions.write
-          && request.resource.data.class in get(/databases/$(database)/documents/vehicles/$(vid)).data.classes;
+        allow get, list: if canReadVehicle(/databases/$(database)/documents/vehicles/$(vid));
+        allow create: if canWriteVehicle(/databases/$(database)/documents/vehicles/$(vid))
+          && isValidNewTrip(/databases/$(database)/documents/vehicles/$(vid), request.resource.data);
+      }
+    }
+
+    // ---- PR プレビュー（preview-channels/pr-<番号>/ 配下） ----
+
+    match /preview-channels/{channel} {
+
+      match /trips/{uid} {
+        allow read, write: if isPreviewChannel(channel)
+          && isSignedInAs(uid);
+      }
+
+      match /users/{uid} {
+        allow get: if isPreviewChannel(channel)
+          && isSignedInAs(uid);
+        allow create: if isPreviewChannel(channel)
+          && isSignedInAs(uid)
+          && isValidNewUser(request.resource.data);
+        allow update: if isPreviewChannel(channel)
+          && isSignedInAs(uid)
+          && isValidUserUpdate(request.resource.data, resource.data);
+      }
+
+      match /vehicles/{vid} {
+        allow create: if isPreviewChannel(channel)
+          && isSignedIn()
+          && isValidNewVehicle(request.resource.data);
+        allow list, get: if isPreviewChannel(channel)
+          && isSignedIn()
+          && request.auth.uid in resource.data.permissions.read;
+        allow update: if isPreviewChannel(channel)
+          && isSignedIn()
+          && request.auth.uid in resource.data.permissions.write
+          && isValidVehicleUpdate(request.resource.data, resource.data);
+
+        match /trips/{tid} {
+          allow get, list: if isPreviewChannel(channel)
+            && canReadVehicle(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid));
+          allow create: if isPreviewChannel(channel)
+            && canWriteVehicle(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid))
+            && isValidNewTrip(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid), request.resource.data);
+        }
       }
     }
   }

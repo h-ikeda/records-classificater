@@ -1,6 +1,7 @@
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { getFirestore, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
+import { channelDoc } from '../firestore/channel';
 import { userConverter } from '../firestore/definitions/User';
 import { vehicleConverter } from '../firestore/definitions/Vehicle';
 import Loader from '../components/Loader';
@@ -27,7 +28,7 @@ export default function VehicleSettings({
 
   // 現在選択中の車両 ID を取得する
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
+    const unsub = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
       setCurrentVehicleId(snapshot.data()?.state.vehicle ?? null);
     });
     return unsub;
@@ -44,7 +45,7 @@ export default function VehicleSettings({
       return;
     }
     const unsub = onSnapshot(
-      doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
+      channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
       (snapshot) => {
         // 初回のみフォームへ反映する。共有操作などで snapshot が再発火しても
         // 編集中の入力を上書きしないようにする
@@ -91,7 +92,7 @@ export default function VehicleSettings({
     const id = prompt('共有相手のIDを入力してください');
     if (!id?.trim()) return;
     try {
-      await updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
+      await updateDoc(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
         'permissions.read': arrayUnion(id.trim()),
         'permissions.write': arrayUnion(id.trim()),
       });
@@ -121,7 +122,7 @@ export default function VehicleSettings({
     setSaving(true);
     setError('');
     try {
-      await updateDoc(doc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
+      await updateDoc(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), {
         name: trimmedName,
         classes: trimmedClasses,
       });
