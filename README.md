@@ -124,6 +124,19 @@ PR クローズ時は `preview-cleanup.yml` が、チャンネル・承認済み
 > アカウント** で、Firebase Authentication のユーザーも本番と共通です。プレビューの
 > データは空の状態から始まるため、車両は PR の中で作り直してください。
 
+> Google ログインは、本番が `signInWithRedirect`、プレビューが `signInWithPopup`
+> です。プレビューの URL はアプリのオリジンが `authDomain`
+> （`records-classificater.web.app`）と一致せず、この状態の
+> `signInWithRedirect` はサードパーティ Cookie／ストレージを遮断するブラウザで
+> 成立しないためです。ポップアップは `authDomain` 上の first-party
+> コンテキストになるので、別オリジンから呼んでも通ります。本番はオリジンが
+> `authDomain` と同一なので、モバイルでポップアップブロックに当たらない
+> リダイレクトのままにしています。
+>
+> プレビュー URL 自体の承認済みドメインへの登録は
+> `firebase hosting:channel:deploy` が自動で行います（`preview.yml` の登録
+> ステップは、それが行われたことの確認を兼ねた押さえです）。
+
 > Firestore のセキュリティルールはプロジェクト共通です。ルールを変更する PR では、
 > その変更はマージされるまでプレビューには反映されません。
 
