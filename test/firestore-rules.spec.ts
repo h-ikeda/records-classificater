@@ -301,6 +301,46 @@ describe('Firestore security rules', () => {
         assertFails(getDoc(doc(env.authenticatedContext(crypto.randomUUID().replace('-', '')).firestore(), 'vehicles', vid))),
       ]);
     });
+    test('a write permitted user can update name and classes', async () => {
+      await Promise.all([
+        assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          name: 'クラウン',
+          classes: ['Business', 'Private', 'Commute'],
+        })),
+        assertSucceeds(updateDoc(doc(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid), {
+          name: 'プリウス',
+        })),
+        assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          'permissions.read': [uid, readOnlyUid, crypto.randomUUID().replace('-', '')],
+        })),
+      ]);
+    });
+    test('update with incorrect values should be denied', async () => {
+      await Promise.all([
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          name: 123,
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          classes: 'NotAList',
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          unapproved: 'value',
+        })),
+        assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', vid), {
+          'permissions.write': 'uid',
+        })),
+      ]);
+    });
+    test('a read only user cannot update a vehicle', async () => {
+      await assertFails(updateDoc(doc(env.authenticatedContext(readOnlyUid).firestore(), 'vehicles', vid), {
+        name: 'カムリ',
+      }));
+    });
+    test('an unauthenticated user cannot update a vehicle', async () => {
+      await assertFails(updateDoc(doc(env.unauthenticatedContext().firestore(), 'vehicles', vid), {
+        name: 'カムリ',
+      }));
+    });
 
     describe('updating the model field', () => {
       let modelVid: string;
@@ -331,16 +371,22 @@ describe('Firestore security rules', () => {
           })),
         ]);
       });
-      test('updating fields other than model should be denied', async () => {
-        await Promise.all([
-          assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
-            name: '別名',
-          })),
-          assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
-            model: 'golf7',
-            name: '別名',
-          })),
-        ]);
+      test('a write permitted user can set the model along with other editable fields', async () => {
+        await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+          name: '別名',
+        }));
+      });
+      test('model is optional and can be removed', async () => {
+        await assertSucceeds(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: deleteField(),
+        }));
+      });
+      test('unapproved fields alongside model should be denied', async () => {
+        await assertFails(updateDoc(doc(env.authenticatedContext(uid).firestore(), 'vehicles', modelVid), {
+          model: 'golf7',
+          unapproved: 'value',
+        }));
       });
       test('a read only user cannot update the model', async () => {
         await assertFails(updateDoc(doc(env.authenticatedContext(readOnlyUid).firestore(), 'vehicles', modelVid), {

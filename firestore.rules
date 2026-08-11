@@ -41,13 +41,19 @@ service cloud.firestore {
         && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
         && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
         && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
-      // 書き込み権限のあるユーザーのみ model を変更できる。許可リストにない車種は設定不可。
-      allow update: if request.auth != null
-        && request.auth.uid in resource.data.permissions.write
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['model'])
-        && isAllowedVehicleModel(request.resource.data.model);
       allow list, get: if request.auth != null
         && request.auth.uid in resource.data.permissions.read;
+      // model は任意フィールドなので、存在するときだけ許可リストと照合する。
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.permissions.write
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'classes', 'permissions', 'model'])
+        && request.resource.data.classes is list
+        && request.resource.data.name is string
+        && request.resource.data.permissions is map
+        && (!request.resource.data.keys().hasAll(['model']) || isAllowedVehicleModel(request.resource.data.model))
+        && request.resource.data.permissions.keys().hasOnly(['write', 'read'])
+        && (!request.resource.data.permissions.keys().hasAll(['write']) || request.resource.data.permissions.write is list)
+        && (!request.resource.data.permissions.keys().hasAll(['read']) || request.resource.data.permissions.read is list);
 
       match /trips/{tid} {
         allow get, list: if request.auth != null
