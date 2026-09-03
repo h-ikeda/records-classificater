@@ -2,6 +2,7 @@ import type { User } from 'firebase/auth';
 import { getFirestore, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import { channelDoc } from '../firestore/channel';
+import { subscribeWithWatchdog } from '../firestore/watchdog';
 import { userConverter } from '../firestore/definitions/User';
 import { vehicleConverter } from '../firestore/definitions/Vehicle';
 import Loader from '../components/Loader';
@@ -27,12 +28,13 @@ export default function VehicleSettings({
   const initialized = useRef(false);
 
   // 現在選択中の車両 ID を取得する
-  useEffect(() => {
-    const unsub = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
-      setCurrentVehicleId(snapshot.data()?.state.vehicle ?? null);
-    });
-    return unsub;
-  }, [currentUser]);
+  useEffect(() => subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
+    notify();
+    setCurrentVehicleId(snapshot.data()?.state.vehicle ?? null);
+  }, () => {
+    notify();
+    setCurrentVehicleId(null);
+  })), [currentUser]);
 
   // 対象車両の現在値を読み込み、フォームの初期値とする
   useEffect(() => {
@@ -44,9 +46,12 @@ export default function VehicleSettings({
       setClasses([]);
       return;
     }
-    const unsub = onSnapshot(
+    // 初回スナップショットが届かないまま無反応になることがあるため、
+    // 届かなければ購読を張り直す（ローダーが回り続けるのを防ぐ）
+    return subscribeWithWatchdog((notify) => onSnapshot(
       channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
       (snapshot) => {
+        notify();
         // 初回のみフォームへ反映する。共有操作などで snapshot が再発火しても
         // 編集中の入力を上書きしないようにする
         if (initialized.current) return;
@@ -65,13 +70,20 @@ export default function VehicleSettings({
       },
       // 権限/通信エラー時もローダーを解除し、画面が固まらないようにする
       () => {
+        notify();
         setName('');
         setClasses([]);
         setError('車両情報の読み込みに失敗しました');
         setLoaded(true);
       },
-    );
-    return unsub;
+    ), {
+      onStalled: () => {
+        setName('');
+        setClasses([]);
+        setError('車両情報を読み込めませんでした。通信状況を確認してください');
+        setLoaded(true);
+      },
+    });
   }, [currentVehicleId]);
 
   function updateClass(id: string, value: string) {

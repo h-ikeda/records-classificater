@@ -3,6 +3,7 @@ import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where
 import { useEffect, useMemo, useRef, useState } from 'react';
 import NewTrip from './components/NewTrip';
 import { channelCollection, channelDoc } from '../firestore/channel';
+import { subscribeWithWatchdog } from '../firestore/watchdog';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
@@ -58,6 +59,8 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
   const [tripsLoaded, setTripsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
+  // 再試行のたびに増やす。購読を張り直すためだけの値
+  const [reloadKey, setReloadKey] = useState(0);
   // users ドキュメントが無い＝まだ車両が 1 台も無い状態。車両名を尋ねる画面を出す
   const [needsSetup, setNeedsSetup] = useState(false);
   const [setupName, setSetupName] = useState('');
@@ -73,14 +76,19 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setVehiclesLoaded(false);
     setLoadError('');
     setNeedsSetup(false);
+    // 前の利用者の選択を引きずらない。車両は users ドキュメントから来る
+    setCurrentVehicleId(null);
     migrating.current = false;
     // スナップショットのコールバックでは状態を更新するだけにし、書き込みや
     // 入力待ちは持ち込まない（登録は createFirstVehicle が受け持つ）
-    const unsubUser = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
+    const unsubUser = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
+      notify();
+      // 変換の失敗や下の早期 return で読み込み中のまま止まらないよう、
+      // 完了はスナップショットを見る前に記録する
+      setUserLoaded(true);
       if (!snapshot.exists()) {
         // まだ車両が 1 台も無い。登録は createFirstVehicle（フォームの送信）で行う
         setNeedsSetup(true);
-        setUserLoaded(true);
         return;
       }
       // 登録中に届くのは自分のローカル書き込みの反映で、車両はまだサーバーに無い。
@@ -89,38 +97,54 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
       if (migrating.current) return;
       setNeedsSetup(false);
       setCurrentVehicleId(snapshot.data().state.vehicle);
-      setUserLoaded(true);
     }, () => {
+      notify();
       setLoadError('データの読み込みに失敗しました');
       setUserLoaded(true);
+    }), {
+      onStalled: () => {
+        setLoadError('データを読み込めませんでした。通信状況を確認して再試行してください');
+        setUserLoaded(true);
+      },
     });
-    const unsubVehicles = onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
-      // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
-      setVehiclesLoaded(true);
-      snapshot.docChanges().forEach(({ doc, type }) => {
-        setVehicles((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => doc.id === id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
+    const unsubVehicles = subscribeWithWatchdog((notify) => {
+      // 張り直すと全件が added として届く。前回分は捨ててから購読する
+      setVehicles([]);
+      return onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
+        notify();
+        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+        setVehiclesLoaded(true);
+        snapshot.docChanges().forEach(({ doc, type }) => {
+          setVehicles((prev) => {
+            if (type === 'added') {
+              return [...prev, { ...doc.data(), id: doc.id }];
+            }
+            const i = prev.findIndex(({ id }) => doc.id === id);
+            if (i < 0) return prev;
+            if (type === 'modified') {
+              const next = [...prev];
+              next[i] = { ...doc.data(), id: doc.id };
+              return next;
+            }
+            return prev.filter((_, idx) => idx !== i);
+          });
         });
+      }, () => {
+        notify();
+        setLoadError('車両一覧の読み込みに失敗しました');
+        setVehiclesLoaded(true);
       });
-    }, () => {
-      setLoadError('車両一覧の読み込みに失敗しました');
-      setVehiclesLoaded(true);
+    }, {
+      onStalled: () => {
+        setLoadError('車両一覧を読み込めませんでした。通信状況を確認して再試行してください');
+        setVehiclesLoaded(true);
+      },
     });
     return () => {
       unsubUser();
       unsubVehicles();
     };
-  }, [currentUser]);
+  }, [currentUser, reloadKey]);
 
   useEffect(() => {
     // 車両切り替え時は前の車両の記録を残さず、読み込み中として扱う
@@ -128,38 +152,51 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setVehicleClasses([]);
     setTripsLoaded(false);
     if (!currentVehicleId) return;
-    const unsubVehicle = onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+    const unsubVehicle = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+      notify();
       setVehicleClasses(snapshot.data()?.classes || []);
     }, () => {
+      notify();
       setVehicleClasses([]);
-    });
-    const unsubTrips = onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
-      // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
-      setTripsLoaded(true);
-      snapshot.docChanges().forEach(({ type, doc }) => {
-        setTrips((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => id === doc.id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
+    }));
+    const unsubTrips = subscribeWithWatchdog((notify) => {
+      // 張り直すと全件が added として届く。前回分は捨ててから購読する
+      setTrips([]);
+      return onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
+        notify();
+        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+        setTripsLoaded(true);
+        snapshot.docChanges().forEach(({ type, doc }) => {
+          setTrips((prev) => {
+            if (type === 'added') {
+              return [...prev, { ...doc.data(), id: doc.id }];
+            }
+            const i = prev.findIndex(({ id }) => id === doc.id);
+            if (i < 0) return prev;
+            if (type === 'modified') {
+              const next = [...prev];
+              next[i] = { ...doc.data(), id: doc.id };
+              return next;
+            }
+            return prev.filter((_, idx) => idx !== i);
+          });
         });
+      }, () => {
+        notify();
+        setLoadError('走行記録の読み込みに失敗しました');
+        setTripsLoaded(true);
       });
-    }, () => {
-      setLoadError('走行記録の読み込みに失敗しました');
-      setTripsLoaded(true);
+    }, {
+      onStalled: () => {
+        setLoadError('走行記録を読み込めませんでした。通信状況を確認して再試行してください');
+        setTripsLoaded(true);
+      },
     });
     return () => {
       unsubVehicle();
       unsubTrips();
     };
-  }, [currentVehicleId]);
+  }, [currentVehicleId, reloadKey]);
 
   const calculatedTrips = useMemo<TripCalculated[]>(() => {
     const [first, ...remains] = [...trips].sort(sortByTimestamp);
@@ -200,6 +237,12 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   function classStyle(cls: string) {
     const i = vehicleClasses.indexOf(cls);
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
+  }
+
+  // 読み込みに失敗した／固まったときに、リロードせず購読だけ張り直す
+  function retryLoad() {
+    setLoadError('');
+    setReloadKey((k) => k + 1);
   }
 
   function setCurrentVehicle(event: React.ChangeEvent<HTMLSelectElement>) {
@@ -323,7 +366,12 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         </label>
       </section>
 
-      {loadError && <p className="mt-3 text-sm text-red-600 text-center" role="alert">{loadError}</p>}
+      {loadError && (
+        <p className="mt-3 text-sm text-red-600 text-center" role="alert">
+          {loadError}
+          <button type="button" onClick={retryLoad} className="ml-2 underline font-medium">再試行</button>
+        </p>
+      )}
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
       <details className="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
@@ -349,7 +397,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
                 </div>
               ))}
             </dl>
-          ) : (
+          ) : loadError ? null : (
             <p className="text-center text-sm text-gray-400 py-2">記録がありません</p>
           )}
         </div>
@@ -384,7 +432,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           <li className="py-10">
             <Loader className="text-lime-500 text-3xl" />
           </li>
-        ) : !displayTrips.length ? (
+        ) : !displayTrips.length && !loadError ? (
           <li className="text-center text-gray-400 py-10">
             {currentVehicleId ? (
               <>まだ記録がありません。<br />下のボタンから追加できます。</>
