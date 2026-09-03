@@ -17,6 +17,15 @@ export const FIRST_SNAPSHOT_TIMEOUT_MS = 8000;
 export const MAX_AUTO_RETRIES = 2;
 
 export interface WatchdogOptions {
+  /**
+   * 購読の名前。張り直したことをコンソールへ残すときに使う。
+   *
+   * 自動で復帰すると、画面上は「少し遅かった」ようにしか見えず、無反応に
+   * なっていた事実が消える。以前この仕組みを外したのも、直ったのか隠れて
+   * いるのか区別が付かなくなるためだった。張り直したら必ず記録を残し、
+   * 起きていたことを後から確かめられるようにする。
+   */
+  label?: string,
   /** 初回スナップショットを待つ時間（ミリ秒） */
   timeoutMs?: number,
   /** 自動で張り直す回数 */
@@ -43,6 +52,7 @@ export interface WatchdogOptions {
 export function subscribeWithWatchdog(
   subscribe: (notify: () => void) => Unsubscribe,
   {
+    label = '購読',
     timeoutMs = FIRST_SNAPSHOT_TIMEOUT_MS,
     maxRetries = MAX_AUTO_RETRIES,
     onStalled,
@@ -77,10 +87,12 @@ export function subscribeWithWatchdog(
       unsubscribe?.();
       unsubscribe = null;
       if (retries >= maxRetries) {
+        console.warn(`${label}: 張り直しても初回スナップショットが届かなかった（${maxRetries} 回）`);
         onStalled?.();
         return;
       }
       retries += 1;
+      console.warn(`${label}: 初回スナップショットが ${timeoutMs}ms 届かないため購読を張り直す（${retries}/${maxRetries} 回目）`);
       onRetry?.(retries);
       start();
     }, timeoutMs);

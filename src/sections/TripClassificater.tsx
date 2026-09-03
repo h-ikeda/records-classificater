@@ -102,6 +102,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
       setLoadError('データの読み込みに失敗しました');
       setUserLoaded(true);
     }), {
+      label: 'ユーザー情報',
       onStalled: () => {
         setLoadError('データを読み込めませんでした。通信状況を確認して再試行してください');
         setUserLoaded(true);
@@ -135,6 +136,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         setVehiclesLoaded(true);
       });
     }, {
+      label: '車両一覧',
       onStalled: () => {
         setLoadError('車両一覧を読み込めませんでした。通信状況を確認して再試行してください');
         setVehiclesLoaded(true);
@@ -158,7 +160,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     }, () => {
       notify();
       setVehicleClasses([]);
-    }));
+    }), { label: '車両情報' });
     const unsubTrips = subscribeWithWatchdog((notify) => {
       // 張り直すと全件が added として届く。前回分は捨ててから購読する
       setTrips([]);
@@ -187,6 +189,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         setTripsLoaded(true);
       });
     }, {
+      label: '走行記録',
       onStalled: () => {
         setLoadError('走行記録を読み込めませんでした。通信状況を確認して再試行してください');
         setTripsLoaded(true);

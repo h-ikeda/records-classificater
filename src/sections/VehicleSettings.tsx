@@ -34,7 +34,7 @@ export default function VehicleSettings({
   }, () => {
     notify();
     setCurrentVehicleId(null);
-  })), [currentUser]);
+  }), { label: 'ユーザー情報（車両設定）' }), [currentUser]);
 
   // 対象車両の現在値を読み込み、フォームの初期値とする
   useEffect(() => {
@@ -77,6 +77,7 @@ export default function VehicleSettings({
         setLoaded(true);
       },
     ), {
+      label: '車両情報（車両設定）',
       onStalled: () => {
         setName('');
         setClasses([]);

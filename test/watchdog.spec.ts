@@ -19,12 +19,18 @@ function createStubSubscribe() {
   };
 }
 
+// 張り直しは必ずコンソールへ残す（自動復帰で症状が見えなくならないように）。
+// 試験中は出力を抑えつつ、呼ばれたことを確かめられるようにする
+let warn: jest.SpyInstance;
+
 beforeEach(() => {
   jest.useFakeTimers();
+  warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
   jest.useRealTimers();
+  warn.mockRestore();
 });
 
 test('スナップショットが届けば張り直さない', () => {
@@ -122,4 +128,28 @@ test('subscribe の中で同期的に届いた場合は見張りを張らない'
 
   unsubscribe();
   expect(unsubscribed).toBe(1);
+});
+
+test('張り直したことをコンソールへ残す', () => {
+  const stub = createStubSubscribe();
+  subscribeWithWatchdog(stub.subscribe, { label: '走行記録', timeoutMs: 1000, maxRetries: 1 });
+
+  jest.advanceTimersByTime(1000);
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn.mock.calls[0][0]).toContain('走行記録');
+
+  // 諦めたことも残す
+  jest.advanceTimersByTime(1000);
+  expect(warn).toHaveBeenCalledTimes(2);
+  expect(warn.mock.calls[1][0]).toContain('走行記録');
+});
+
+test('届いたときは何も残さない', () => {
+  const stub = createStubSubscribe();
+  subscribeWithWatchdog(stub.subscribe, { timeoutMs: 1000 });
+
+  stub.deliver();
+  jest.advanceTimersByTime(10000);
+
+  expect(warn).not.toHaveBeenCalled();
 });
