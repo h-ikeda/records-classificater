@@ -9,10 +9,13 @@ name: Preview deploy
 #
 # PR 側から来るのは次の 2 つだけで、どちらも信頼しない入力として扱う。
 #
-#   dist/           … 配信するファイル。プレビューとはそもそもこれを見るもの
-#   firestore.rules … main の本番用ルールと合成し、プレビューのパス配下へ
-#                     入れ子にする。入れ子から出られないことは
-#                     scripts/compose-firestore-rules.js が検証する
+#   dist/ … 配信するファイル。プレビューとはそもそもこれを見るもの
+#
+# セキュリティルールは成果物からは受け取らず、開いている PR ぶんを GitHub API
+# から集め直す（scripts/collect-preview-rules.js）。チャンネルごとに別々の
+# ブロックとして並べるため、PR が同時に開いていても互いのルールは混ざらない。
+# 各 PR の区間が自分のチャンネルの外へ出られないことは
+# scripts/compose-firestore-rules.js が検証する。
 #
 # PR 番号は成果物の meta.json ではなく API から引き直す。成果物は PR 側で作られる
 # ため、そこに書かれた番号をそのまま信じると、別の PR のチャンネルへ出させる
@@ -96,7 +99,7 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.pr.outputs.sha }}
         run: |
-          for f in incoming/meta.json incoming/firestore.rules incoming/dist/index.html; do
+          for f in incoming/meta.json incoming/dist/index.html; do
             [ -f "$f" ] || { echo "::error::成果物に $f がありません"; exit 1; }
           done
           meta_pr="$(jq -r '.pr' incoming/meta.json)"
@@ -107,17 +110,28 @@ jobs:
           fi
           echo "PR=$PR_NUMBER" >> "$GITHUB_ENV"
           echo "PR $PR_NUMBER（$HEAD_SHA）の成果物を受け取りました"
+      - name: Collect the preview rules of every open pull request
+        # 「今デプロイする PR」だけでなく、開いている PR ぶんを集める。
+        # ルールセットはプロジェクトに 1 つなので、ここで全部を組み直さないと
+        # ほかの PR のプレビューのルールが消えてしまう。
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/collect-preview-rules.js --repo '${{ github.repository }}' --out previews
       - name: Compose the security rules
-        # 本番の区間は main のもの、プレビューの区間は PR のものを使う。
-        # PR のルールは preview-channels/<チャンネル>/ 配下へ入れ子にされ、
-        # そこから出られないことを合成スクリプトが検証する。検証に落ちれば
-        # ここでジョブが止まり、何もデプロイされない。
+        # 本番の区間は main のもの、プレビューの区間はチャンネルごとに各 PR の
+        # ものを使う。各 PR のルールは preview-channels/pr-<番号>/ 配下へ
+        # 入れ子にされ、そこから出られないことを合成スクリプトが検証する。
+        #
+        # --required-channel で、いまデプロイする PR のルールだけは検証に落ちたら
+        # ジョブを止める。ほかの PR のルールが壊れていた場合は、その PR を飛ばして
+        # 続ける（1 つの PR のせいで、ほかの PR のプレビューまで出せなくなるのを
+        # 避けるため。飛ばしたことは警告として残る）。
         run: |
           node scripts/compose-firestore-rules.js \
             --production firestore.rules \
-            --preview incoming/firestore.rules \
+            --previews previews \
+            --required-channel "pr-$PR" \
             --production-label "main" \
-            --preview-label "PR #$PR (${{ steps.pr.outputs.sha }})" \
             --out firestore.composed.rules
           echo "--- 実際にデプロイするルール ---"
           cat firestore.composed.rules
@@ -230,7 +244,7 @@ jobs:
               '- コミット: ${{ steps.pr.outputs.sha }}',
               '- チャンネル: `pr-${{ env.PR }}`（最終デプロイから 7 日で失効、push ごとに更新）',
               '- データ: Firestore `preview-channels/pr-${{ env.PR }}/…`（本番と分離。空の状態から始まります）',
-              '- ルール: 本番の区間は `main`、プレビューの区間はこの PR のものを使って合成しています。',
+              '- ルール: 本番の区間は `main`、プレビューの区間はチャンネルごとに各 PR のものを使って合成しています。',
               '- ログインは **本番と同じ Google アカウント** です（同じ Firebase プロジェクトのため）。',
               '',
               'この URL での操作は `preview-channels/pr-${{ env.PR }}` 配下にのみ書き込まれ、本番のデータには影響しません。PR クローズ時にまとめて削除されます。',

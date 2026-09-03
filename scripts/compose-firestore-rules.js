@@ -1,36 +1,52 @@
 'use strict';
 
-// 本番用のルール（main のもの）と、プレビュー用のルール（PR ブランチのもの）を
-// 1 つのルールセットに合成する。
+// 本番用のルール（main のもの）と、プレビュー用のルール（開いている PR ごとの
+// もの）を 1 つのルールセットに合成する。
 //
-//   本番     : match /databases/{database}/documents { <本番の区間> }
-//   プレビュー: match /databases/{database}/documents {
-//                match /preview-channels/{channel} { <ブランチの区間> } }
+//   match /databases/{database}/documents { <main の区間> }
+//   match /databases/{database}/documents {
+//     match /preview-channels/pr-453 { <PR #453 の区間> } }
+//   match /databases/{database}/documents {
+//     match /preview-channels/pr-460 { <PR #460 の区間> } }
 //
 // Firestore のルールはプロジェクトに 1 つしか無いため、本番とプレビューを同じ
-// ルールセットに同居させる必要がある。ここを「main のルールを土台に、ブランチの
-// ルールはプレビューのパス配下へ入れ子にする」形で組むことで、
+// ルールセットに同居させる必要がある。ここを「main のルールを土台に、各 PR の
+// ルールはその PR のチャンネルのパス配下へ入れ子にする」形で組むことで、
 //
 //   * 本番のパスを支配するのは常に main のルールになる（PR は手を出せない）
-//   * PR がルールを変更しても、その効果はその PR のプレビューのパスに閉じる
+//   * PR がルールを変更しても、その効果はその PR のチャンネルに閉じる
+//   * 複数の PR が同時に開いていても、互いのルールが混ざらない
 //
-// の 2 つが同時に成り立つ。ルール変更のある PR でも、マージ前にプレビューで
-// 挙動を確かめられる。
+// が成り立つ。ルール変更のある PR でも、マージ前にプレビューで挙動を確かめられる。
+//
+// チャンネルのパスは変数（{channel}）ではなく **pr-<番号> の literal** で書く。
+// そのため、ここに並べていないチャンネル（＝開いている PR に対応しないもの）は
+// どのルールにも当たらず、既定どおり拒否される。後片付けの届かないデータを
+// preview-channels の下に作れないのはこのため。
 //
 // **ブランチ側の区間は信頼できない入力として扱う。** 入れ子の外へ出られない
 // ことを、閉じ括弧の深さで検証する（深さが一度でも 0 を下回れば、包んでいる
 // match を閉じて本番のパスに規則を足そうとしている）。ここが破れなければ、
-// ブランチの区間に何が書かれていても preview-channels の外へは届かない。
+// ブランチの区間に何が書かれていても preview-channels/<そのチャンネル> の外へは
+// 届かない。
 
 const fs = require('fs');
+const path = require('path');
 
 const BEGIN = '// === APP RULES BEGIN ===';
 const END = '// === APP RULES END ===';
 
-// ルート直下を絶対パスで参照するときの唯一の書き方。プレビューではこの前に
+// ルート直下を絶対パスで参照するときの唯一の書き方。プレビューではこの後ろに
 // チャンネルのパスが挟まる。
 const ROOT_PATH = '/databases/$(database)/documents';
-const PREVIEW_ROOT_PATH = `${ROOT_PATH}/preview-channels/$(channel)`;
+
+// チャンネル名は PR 番号から決まる形だけを許す。
+const CHANNEL_PATTERN = /^pr-\d+$/;
+
+// Firestore にはルールセットのサイズ上限がある。上限に当たると deploy が
+// 分かりにくい形で失敗するので、その手前で理由を添えて落とす。開いている PR が
+// 増えるほど大きくなるため、ここが効くのは PR を溜めすぎたときになる。
+const DEFAULT_MAX_BYTES = 60 * 1024;
 
 /** BEGIN / END に挟まれた区間を取り出す。 */
 function extractRegion(text, label) {
@@ -39,10 +55,10 @@ function extractRegion(text, label) {
   if (begins !== 1 || ends !== 1) {
     throw new Error(`${label}: 区間の目印が ${begins} 個 / ${ends} 個 見つかりました（それぞれ 1 個である必要があります）`);
   }
-  const region = text.slice(text.indexOf(BEGIN) + BEGIN.length, text.indexOf(END));
   if (text.indexOf(END) < text.indexOf(BEGIN)) {
     throw new Error(`${label}: 区間の目印の順序が逆です`);
   }
+  const region = text.slice(text.indexOf(BEGIN) + BEGIN.length, text.indexOf(END));
   if (!region.trim()) {
     throw new Error(`${label}: 区間が空です`);
   }
@@ -107,13 +123,13 @@ function assertSelfContained(region, label) {
   }
 }
 
-/** ルート参照をプレビューのパスへ寄せる。 */
-function rewriteRootPaths(region, label) {
-  const rewritten = region.split(ROOT_PATH).join(PREVIEW_ROOT_PATH);
+/** ルート参照を、そのチャンネルのパスへ寄せる。 */
+function rewriteRootPaths(region, channel, label) {
+  const target = `${ROOT_PATH}/preview-channels/${channel}`;
+  const rewritten = region.split(ROOT_PATH).join(target);
   // 置き換え後に残った /databases は、想定外の書き方をしている証拠。
   // そのまま通すと、プレビューのルールが本番のドキュメントを読んでしまう。
-  const leftover = rewritten.split(PREVIEW_ROOT_PATH).join('');
-  if (leftover.includes('/databases')) {
+  if (rewritten.split(target).join('').includes('/databases')) {
     throw new Error(`${label}: ルートの絶対参照は "${ROOT_PATH}" の形だけが使えます`);
   }
   return rewritten;
@@ -133,46 +149,95 @@ function reindent(text, spaces) {
 }
 
 /**
- * 合成したルールセットを返す。
+ * 合成したルールセットを組み立てる。
  *
  * @param {object} options
  * @param {string} options.production 本番用ルールの中身（main のもの）
- * @param {string} [options.preview] プレビュー用ルールの中身。既定は production と同じ
+ * @param {{channel: string, rules: string, label?: string}[]} [options.previews]
+ *   チャンネルごとのプレビュー用ルール
  * @param {string} [options.productionLabel] 生成物のコメントに書く出所
- * @param {string} [options.previewLabel] 同上
+ * @param {string} [options.requiredChannel]
+ *   このチャンネルだけは、検証に落ちたら例外にする（＝今デプロイしようとしている
+ *   PR。ほかの PR のルールが壊れていても、そのせいで全体のデプロイを止めない）
+ * @param {number} [options.maxBytes] 合成結果のサイズ上限
+ * @returns {{text: string, included: string[], skipped: {channel: string, reason: string}[]}}
  */
-function composeRules({ production, preview, productionLabel = 'main', previewLabel = 'main' }) {
+function composeRules({
+  production,
+  previews = [],
+  productionLabel = 'main',
+  requiredChannel,
+  maxBytes = DEFAULT_MAX_BYTES,
+}) {
   const productionRegion = extractRegion(production, '本番のルール');
   assertSelfContained(productionRegion, '本番のルール');
 
-  const previewSource = preview === undefined ? production : preview;
-  const previewRegion = extractRegion(previewSource, 'プレビューのルール');
-  assertSelfContained(previewRegion, 'プレビューのルール');
-  const previewNested = rewriteRootPaths(previewRegion, 'プレビューのルール');
+  const blocks = [];
+  const included = [];
+  const skipped = [];
 
-  return `rules_version = '2';
+  for (const { channel, rules, label } of previews) {
+    const name = label ? `${channel}（${label}）` : channel;
+    try {
+      if (!CHANNEL_PATTERN.test(channel)) {
+        throw new Error(`チャンネル名は pr-<番号> の形である必要があります: ${channel}`);
+      }
+      const region = extractRegion(rules, `${name} のルール`);
+      assertSelfContained(region, `${name} のルール`);
+      const nested = rewriteRootPaths(region, channel, `${name} のルール`);
+      blocks.push(`
+  // ---- プレビュー ${name} ----
+  match /databases/{database}/documents {
+    match /preview-channels/${channel} {
+${reindent(nested, 6)}
+    }
+  }
+`);
+      included.push(channel);
+    } catch (error) {
+      // 今デプロイしようとしている PR のルールが壊れているなら、黙って落として
+      // 「なぜかプレビューが動かない」を作るより、はっきり失敗させる。
+      if (channel === requiredChannel) throw error;
+      skipped.push({ channel, reason: error.message });
+    }
+  }
+
+  const text = `rules_version = '2';
 // この内容は scripts/compose-firestore-rules.js が生成したものです。直接編集しないでください。
 // 本番のルール      : ${productionLabel}
-// プレビューのルール: ${previewLabel}
+// プレビューのルール: ${included.length ? included.join(', ') : '（対象なし）'}
 service cloud.firestore {
 
   // ---- 本番（ルート直下）----
   match /databases/{database}/documents {
 ${reindent(productionRegion, 4)}
   }
-
-  // ---- PR プレビュー（preview-channels/<チャンネル>/ 配下）----
-  //
-  // 本番とは別の match /databases/{database}/documents として並べてある。
-  // 関数のスコープが分かれるため、この中のルールが本番側の関数を参照することは
-  // なく、逆もない。パスも preview-channels 配下に限られる。
-  match /databases/{database}/documents {
-    match /preview-channels/{channel} {
-${reindent(previewNested, 6)}
-    }
-  }
-}
+${blocks.join('')}}
 `;
+
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > maxBytes) {
+    throw new Error(
+      `合成結果が大きすぎます（${bytes} バイト > ${maxBytes} バイト）。`
+      + `開いている PR が ${previews.length} 件あります。Firestore のルールセットには`
+      + 'サイズ上限があるため、PR を整理するか上限の設定を見直してください',
+    );
+  }
+
+  return { text, included, skipped };
+}
+
+/** ディレクトリに並んだ <チャンネル>.rules を読み込む。 */
+function readPreviewDir(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith('.rules'))
+    .sort()
+    .map((name) => ({
+      channel: name.slice(0, -'.rules'.length),
+      rules: fs.readFileSync(path.join(dir, name), 'utf8'),
+    }));
 }
 
 function parseArgs(argv) {
@@ -194,17 +259,25 @@ if (require.main === module) {
     if (!args.production) {
       throw new Error('--production <本番ルールのパス> は必須です');
     }
-    const composed = composeRules({
+    const { text, included, skipped } = composeRules({
       production: fs.readFileSync(args.production, 'utf8'),
-      preview: args.preview ? fs.readFileSync(args.preview, 'utf8') : undefined,
+      previews: args.previews ? readPreviewDir(args.previews) : [],
       productionLabel: args['production-label'] || args.production,
-      previewLabel: args['preview-label'] || args.preview || args.production,
+      requiredChannel: args['required-channel'],
     });
+    for (const { channel, reason } of skipped) {
+      // 壊れている PR のルールは飛ばす。1 つの PR のせいで、ほかの PR や本番の
+      // デプロイまで止まると困るため。飛ばしたことは見えるようにしておく。
+      process.stderr.write(`::warning::${channel} のルールを組み込めませんでした: ${reason}\n`);
+    }
     if (args.out) {
-      fs.writeFileSync(args.out, composed);
-      process.stderr.write(`合成したルールを ${args.out} に書き出しました\n`);
+      fs.writeFileSync(args.out, text);
+      process.stderr.write(
+        `合成したルールを ${args.out} に書き出しました`
+        + `（プレビュー: ${included.length ? included.join(', ') : 'なし'}）\n`,
+      );
     } else {
-      process.stdout.write(composed);
+      process.stdout.write(text);
     }
   } catch (error) {
     process.stderr.write(`::error::ルールの合成に失敗しました: ${error.message}\n`);
@@ -212,4 +285,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { composeRules, extractRegion, assertSelfContained, BEGIN, END };
+module.exports = { composeRules, readPreviewDir, extractRegion, assertSelfContained, BEGIN, END };

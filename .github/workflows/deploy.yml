@@ -29,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # 開いている PR の firestore.rules を読むために必要。
+      pull-requests: read
     env:
       PROJECT_ID: records-classificater
     steps:
@@ -45,15 +47,22 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Collect the preview rules of every open pull request
+        # 本番のデプロイでも、開いている PR ぶんのプレビュー用ルールを組み込む。
+        # ここで落とすと、マージのたびに開いている PR のプレビューのルールが
+        # 消えてしまう。
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/collect-preview-rules.js --repo '${{ github.repository }}' --out previews
       - name: Compose the security rules
-        # firestore.rules（本番用）を土台に、プレビュー用の区間も main のもので
-        # 組み立てる。プレビューのパスに main 由来のルールを常に置いておくことで、
-        # ルールを変更しない PR のプレビューは、何もしなくても動く。
-        #
-        # ルールを変更する PR のプレビューでは、preview-deploy.yml が同じ土台に
-        # その PR の区間を入れて出し直す。
+        # 本番の区間は firestore.rules（＝この push の内容）、プレビューの区間は
+        # チャンネルごとに各 PR のものを使う。
         run: |
-          npm run rules:compose
+          node scripts/compose-firestore-rules.js \
+            --production firestore.rules \
+            --previews previews \
+            --production-label "main" \
+            --out firestore.composed.rules
           echo "--- 実際にデプロイするルール ---"
           cat firestore.composed.rules
       - id: auth

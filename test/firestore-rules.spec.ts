@@ -10,7 +10,10 @@ const PRODUCTION_RULES = fs.readFileSync(path.join(__dirname, '..', 'firestore.r
 
 // 実際にデプロイされるのは合成後のルールセットなので、テストもそれに当てる。
 // firestore.rules 単体（＝本番用）ではプレビューのパスにルールが無い。
-const COMPOSED_RULES = composeRules({ production: PRODUCTION_RULES });
+const COMPOSED_RULES: string = composeRules({
+  production: PRODUCTION_RULES,
+  previews: [{ channel: 'pr-1', rules: PRODUCTION_RULES }],
+}).text;
 
 /** 本番用ルールの区間だけを差し替えた、ブランチ側のルールを作る。 */
 function withAppRules(body: string): string {
@@ -419,13 +422,10 @@ describe.each(roots)('Firestore security rules (%s)', (_label, root) => {
 });
 
 // ここからは「合成」そのものの性質を確かめる。本番のパスを支配するのは常に
-// main のルールで、ブランチのルールはプレビューのパスの外へ出られない、という
-// のがこの仕組みの拠り所なので、その 2 つを実際に動かして確認する。
-describe('rules composition', () => {
-  test('入れ子を抜け出そうとする区間は合成時に拒否される', () => {
-    // 包んでいる match を閉じてから、本番のパスに規則を足そうとする。
-    // 括弧の総数は合っているので、深さを見ていないと通ってしまう。
-    const escaping = withAppRules(`
+// main のルールで、各 PR のルールはその PR のチャンネルの外へ出られない、という
+// のがこの仕組みの拠り所なので、実際に動かして確認する。
+
+const ESCAPING_RULES = withAppRules(`
       match /harmless/{id} {
         allow read: if true;
       }
@@ -434,9 +434,45 @@ describe('rules composition', () => {
   match /databases/{database}/documents {
     match /vehicles/{vid} {
       allow read, write: if true;
-    `);
-    expect(() => composeRules({ production: PRODUCTION_RULES, preview: escaping }))
-      .toThrow(/閉じ括弧が多すぎます|match \/databases/);
+    }
+`);
+
+const PERMISSIVE_RULES = withAppRules(`
+      match /{document=**} {
+        allow read, write: if true;
+      }
+`);
+
+describe('rules composition', () => {
+  test('入れ子を抜け出そうとする区間は、そのチャンネルのデプロイでは失敗する', () => {
+    // 包んでいる match を閉じてから、本番のパスに規則を足そうとする。
+    // 括弧の総数は合っているので、深さを見ていないと通ってしまう。
+    expect(() => composeRules({
+      production: PRODUCTION_RULES,
+      previews: [{ channel: 'pr-1', rules: ESCAPING_RULES }],
+      requiredChannel: 'pr-1',
+    })).toThrow(/閉じ括弧が多すぎます|match \/databases/);
+  });
+
+  test('壊れた PR のルールは飛ばされ、ほかの PR のデプロイは止まらない', () => {
+    const composed = composeRules({
+      production: PRODUCTION_RULES,
+      previews: [
+        { channel: 'pr-1', rules: ESCAPING_RULES },
+        { channel: 'pr-2', rules: PRODUCTION_RULES },
+      ],
+      requiredChannel: 'pr-2',
+    });
+    expect(composed.included).toEqual(['pr-2']);
+    expect(composed.skipped.map((s: { channel: string }) => s.channel)).toEqual(['pr-1']);
+  });
+
+  test('チャンネル名が pr-<番号> でなければ組み込まれない', () => {
+    expect(() => composeRules({
+      production: PRODUCTION_RULES,
+      previews: [{ channel: 'staging', rules: PRODUCTION_RULES }],
+      requiredChannel: 'staging',
+    })).toThrow(/チャンネル名/);
   });
 
   test('ルートの絶対参照が想定外の書き方なら拒否される', () => {
@@ -445,8 +481,11 @@ describe('rules composition', () => {
         allow get: if get(/databases/(default)/documents/vehicles/$(vid)).data.open == true;
       }
     `);
-    expect(() => composeRules({ production: PRODUCTION_RULES, preview: odd }))
-      .toThrow(/ルートの絶対参照/);
+    expect(() => composeRules({
+      production: PRODUCTION_RULES,
+      previews: [{ channel: 'pr-1', rules: odd }],
+      requiredChannel: 'pr-1',
+    })).toThrow(/ルートの絶対参照/);
   });
 
   test('区間の目印が無いファイルは拒否される', () => {
@@ -455,22 +494,23 @@ describe('rules composition', () => {
   });
 });
 
-// ブランチのルールがどれだけ緩くても、本番のパスには一切届かないこと。
-// これが崩れると、PR がルールを書き換えるだけで本番のデータに手が届く。
-describe('Firestore security rules (a permissive branch ruleset)', () => {
+// チャンネルごとに別々のルールを持てること、そしてどれだけ緩いルールを持ち込んでも
+// 自分のチャンネルの外（本番のパスも、ほかの PR のチャンネルも）には届かないこと。
+describe('Firestore security rules (per-channel rules)', () => {
   let env: RulesTestEnvironment;
 
   beforeAll(async () => {
-    // 「何でも許す」ブランチのルールで合成する
-    const permissive = withAppRules(`
-      match /{document=**} {
-        allow read, write: if true;
-      }
-    `);
     env = await initializeTestEnvironment({
       projectId: 'demo-records-classificater',
       firestore: {
-        rules: composeRules({ production: PRODUCTION_RULES, preview: permissive }),
+        rules: composeRules({
+          production: PRODUCTION_RULES,
+          previews: [
+            // pr-1 は「何でも許す」ルール、pr-2 は本番と同じルール
+            { channel: 'pr-1', rules: PERMISSIVE_RULES },
+            { channel: 'pr-2', rules: PRODUCTION_RULES },
+          ],
+        }).text,
       },
     });
   });
@@ -479,13 +519,20 @@ describe('Firestore security rules (a permissive branch ruleset)', () => {
     await env.cleanup();
   });
 
-  test('プレビューのパスにはブランチのルールが効く', async () => {
-    // 未認証でも通る = 差し替えたルールが確かに適用されている
+  test('緩いルールを持ち込んだチャンネルでは、そのとおりに緩い', async () => {
     const firestore = env.unauthenticatedContext().firestore();
     await assertSucceeds(setDoc(doc(firestore, 'preview-channels', 'pr-1', 'anything', 'x'), { a: 1 }));
   });
 
-  test('本番のパスは main のルールのままで、ブランチのルールは届かない', async () => {
+  test('ほかのチャンネルは巻き込まれず、自分のルールのままになる', async () => {
+    const firestore = env.unauthenticatedContext().firestore();
+    await Promise.all([
+      assertFails(setDoc(doc(firestore, 'preview-channels', 'pr-2', 'anything', 'x'), { a: 1 })),
+      assertFails(setDoc(doc(firestore, 'preview-channels', 'pr-2', 'vehicles', 'x'), { a: 1 })),
+    ]);
+  });
+
+  test('本番のパスは main のルールのままで、どのチャンネルのルールも届かない', async () => {
     const firestore = env.unauthenticatedContext().firestore();
     await Promise.all([
       assertFails(setDoc(doc(firestore, 'vehicles', 'x'), { a: 1 })),
@@ -498,7 +545,23 @@ describe('Firestore security rules (a permissive branch ruleset)', () => {
   test('本番のパスの検証は、認証済みでも main のルールで判断される', async () => {
     const user = crypto.randomUUID().replace('-', '');
     const firestore = env.authenticatedContext(user).firestore();
-    // main のルールは users に state 以外のキーを許さない
     await assertFails(setDoc(doc(firestore, 'users', user), { unapproved: 'value' }));
+  });
+
+  test('組み込まれていないチャンネルには、どのルールも当たらない', async () => {
+    // チャンネルのパスは literal で並べるため、開いている PR に対応しない
+    // チャンネルはルール不在＝拒否になる（後片付けの届かないデータを作れない）。
+    const user = crypto.randomUUID().replace('-', '');
+    const firestore = env.authenticatedContext(user).firestore();
+    await Promise.all([
+      assertFails(setDoc(doc(firestore, 'preview-channels', 'pr-999', 'users', user), {
+        state: { vehicle: 'v' },
+      })),
+      assertFails(addDoc(collection(firestore, 'preview-channels', 'staging', 'vehicles'), {
+        classes: ['Business'],
+        name: 'カローラ',
+        permissions: { read: [user], write: [user] },
+      })),
+    ]);
   });
 });

@@ -58,8 +58,8 @@ jobs:
           fi
           echo "チャンネル pr-$PR がバンドルに埋め込まれています"
       - name: Stage the artifact
-        # firestore.rules を一緒に渡す。デプロイ側が main の本番用ルールと
-        # 合成して、この PR のプレビューのパス配下へ入れ子にする。
+        # 渡すのは配信するファイルだけ。firestore.rules は載せない（デプロイ側が
+        # 開いている PR 全部のルールを GitHub API から集め直すため）。
         #
         # meta.json は突き合わせ用。デプロイ側は PR 番号をこれではなく API から
         # 引き直し、食い違っていれば止める（成果物は PR 側で作られるため、
@@ -67,7 +67,6 @@ jobs:
         run: |
           mkdir -p artifact
           cp -r dist artifact/dist
-          cp firestore.rules artifact/firestore.rules
           printf '{"pr":%s,"sha":"%s"}\n' "$PR" '${{ github.event.pull_request.head.sha }}' \
             > artifact/meta.json
           cat artifact/meta.json
