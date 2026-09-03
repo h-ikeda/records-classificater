@@ -417,6 +417,12 @@ describe.each(roots)('Firestore security rules (%s)', (_label, root) => {
       test('a write only user cannot get a trip', async () => {
         await assertFails(getDocs(col(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid, 'trips')));
       });
+      // 権限判定は親の車両ドキュメントを get して行うため、車両がまだ無いと拒否される。
+      // クライアントは車両の作成がサーバーで確定してから trips を購読しなければならない
+      // （確定前に購読すると、このエラーでリスナーが終了して以後更新が届かなくなる）。
+      test('a user cannot list trips of a vehicle that does not exist', async () => {
+        await assertFails(getDocs(col(env.authenticatedContext(uid).firestore(), 'vehicles', 'not-created-yet', 'trips')));
+      });
     });
   });
 });

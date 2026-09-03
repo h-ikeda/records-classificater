@@ -1,6 +1,6 @@
 import type { User } from 'firebase/auth';
 import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import NewTrip from './components/NewTrip';
 import { channelCollection, channelDoc } from '../firestore/channel';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
@@ -58,15 +58,21 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
   const [tripsLoaded, setTripsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
+  // 移行処理の実行中フラグ。移行中に届くスナップショットは自分のローカル書き込みの
+  // 反映であり、参照先の車両がまだサーバーに無いため状態へ反映してはいけない
+  const migrating = useRef(false);
 
   useEffect(() => {
     setVehicles([]);
     setUserLoaded(false);
     setVehiclesLoaded(false);
     setLoadError('');
+    migrating.current = false;
     const unsubUser = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
       if (!snapshot.exists()) {
-        // 旧データからの移行。完了すると users ドキュメントが作られ、本コールバックが再度呼ばれる
+        // 旧データからの移行（初回登録を含む）
+        if (migrating.current) return;
+        migrating.current = true;
         try {
           const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
           const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
@@ -92,14 +98,23 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           oldTrips.forEach((trip) => {
             batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
           });
-          await batch2.commit();
+          // 過去記録の移行に失敗しても車両自体は作成済みなので、画面は進める
+          await batch2.commit().catch(() => setLoadError('過去の記録の移行に失敗しました'));
+          // commit の解決はサーバー確定を待つ。trips のルールは親の車両ドキュメントを
+          // get して権限を見るため、サーバーに車両が無いうちに購読を始めると
+          // 権限エラーでリスナーが終了してしまう。確定後にまとめて反映する
+          setCurrentVehicleId(newVehicle.id);
+          setUserLoaded(true);
         } catch {
           // 失敗時もローダーを解除し、画面が固まらないようにする
           setLoadError('データの読み込みに失敗しました');
           setUserLoaded(true);
+        } finally {
+          migrating.current = false;
         }
         return;
       }
+      if (migrating.current) return;
       setCurrentVehicleId(snapshot.data().state.vehicle);
       setUserLoaded(true);
     }, () => {
