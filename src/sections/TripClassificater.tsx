@@ -129,6 +129,11 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
   const [tripsLoaded, setTripsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
+  // users ドキュメントが無い＝まだ車両が 1 台も無い状態。車両名を尋ねる画面を出す
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [setupName, setSetupName] = useState('');
+  const [setupSaving, setSetupSaving] = useState(false);
+  const [setupError, setSetupError] = useState('');
   // 移行処理の実行中フラグ。移行中に届くスナップショットは自分のローカル書き込みの
   // 反映であり、参照先の車両がまだサーバーに無いため状態へ反映してはいけない
   const migrating = useRef(false);
@@ -138,55 +143,23 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setUserLoaded(false);
     setVehiclesLoaded(false);
     setLoadError('');
+    setNeedsSetup(false);
     migrating.current = false;
-    const unsubUser = subscribeWithRetry((onFirstSnapshot, onError) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
+    // スナップショットのコールバックでは状態を更新するだけにする。ここで待たせたり
+    // ダイアログを出したりすると、その間に購読の受信ストリームが切れることがある
+    const unsubUser = subscribeWithRetry((onFirstSnapshot, onError) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
       onFirstSnapshot();
       if (!snapshot.exists()) {
-        // 旧データからの移行（初回登録を含む）
-        if (migrating.current) return;
-        migrating.current = true;
-        try {
-          const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
-          const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
-            return acc.add(cls);
-          }, new Set<string>()));
-          const name = prompt('車の名称を入力してください');
-          const batch1 = writeBatch(db);
-          const newVehicle = doc(channelCollection(db, 'vehicles')).withConverter(vehicleConverter);
-          await batch1
-            .set(newVehicle, {
-              classes,
-              name: name || '',
-              permissions: {
-                read: [currentUser.uid],
-                write: [currentUser.uid],
-              },
-            })
-            .set(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), {
-              state: { vehicle: newVehicle.id },
-            })
-            .commit();
-          const batch2 = writeBatch(db);
-          oldTrips.forEach((trip) => {
-            batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
-          });
-          // 過去記録の移行に失敗しても車両自体は作成済みなので、画面は進める
-          await batch2.commit().catch(() => setLoadError('過去の記録の移行に失敗しました'));
-          // commit の解決はサーバー確定を待つ。trips のルールは親の車両ドキュメントを
-          // get して権限を見るため、サーバーに車両が無いうちに購読を始めると
-          // 権限エラーでリスナーが終了してしまう。確定後にまとめて反映する
-          setCurrentVehicleId(newVehicle.id);
-          setUserLoaded(true);
-        } catch {
-          // 失敗時もローダーを解除し、画面が固まらないようにする
-          setLoadError('データの読み込みに失敗しました');
-          setUserLoaded(true);
-        } finally {
-          migrating.current = false;
-        }
+        // まだ車両が 1 台も無い。登録は createFirstVehicle（フォームの送信）で行う
+        setNeedsSetup(true);
+        setUserLoaded(true);
         return;
       }
+      // 登録中に届くのは自分のローカル書き込みの反映で、車両はまだサーバーに無い。
+      // trips のルールは親の車両ドキュメントを get して権限を見るため、ここで
+      // 購読を始めると権限エラーになる。createFirstVehicle が確定後に反映する
       if (migrating.current) return;
+      setNeedsSetup(false);
       setCurrentVehicleId(snapshot.data().state.vehicle);
       setUserLoaded(true);
     }, onError), () => {
@@ -318,6 +291,55 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     });
   }
 
+  // 最初の車両を作り、旧データがあれば移行する。ユーザー操作から呼ぶこと
+  async function createFirstVehicle(event: React.FormEvent) {
+    event.preventDefault();
+    const name = setupName.trim();
+    if (!name) {
+      setSetupError('車両名を入力してください');
+      return;
+    }
+    if (migrating.current) return;
+    migrating.current = true;
+    setSetupSaving(true);
+    setSetupError('');
+    try {
+      const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
+      const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
+        return acc.add(cls);
+      }, new Set<string>()));
+      const batch1 = writeBatch(db);
+      const newVehicle = doc(channelCollection(db, 'vehicles')).withConverter(vehicleConverter);
+      await batch1
+        .set(newVehicle, {
+          classes,
+          name,
+          permissions: {
+            read: [currentUser.uid],
+            write: [currentUser.uid],
+          },
+        })
+        .set(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), {
+          state: { vehicle: newVehicle.id },
+        })
+        .commit();
+      const batch2 = writeBatch(db);
+      oldTrips.forEach((trip) => {
+        batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
+      });
+      // 過去記録の移行に失敗しても車両自体は作成済みなので、画面は進める
+      await batch2.commit().catch(() => setLoadError('過去の記録の移行に失敗しました'));
+      // commit の解決はサーバー確定を待つ。確定してから購読を始める
+      setCurrentVehicleId(newVehicle.id);
+      setNeedsSetup(false);
+    } catch {
+      setSetupError('登録に失敗しました。通信状況を確認して、もう一度お試しください');
+    } finally {
+      migrating.current = false;
+      setSetupSaving(false);
+    }
+  }
+
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
   function createTrip(trip: Trip): string | null {
     const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
@@ -328,6 +350,37 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     addDoc(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
     setNewTripEnabled(false);
     return null;
+  }
+
+  // 車両が 1 台も無いうちは、他の操作より先に車両名を尋ねる
+  if (needsSetup) {
+    return (
+      <section className="mt-8 mx-auto max-w-sm">
+        <h3 className="text-lg font-bold text-gray-800">最初の車両を登録</h3>
+        <p className="mt-2 text-sm text-gray-500">走行を記録する車両の名前を入力してください。あとから設定で変更できます。</p>
+        <form className="mt-5 space-y-4" onSubmit={createFirstVehicle}>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-600">車両名</span>
+            <input
+              value={setupName}
+              onChange={(e) => setSetupName(e.target.value)}
+              type="text"
+              placeholder="例: カローラ"
+              autoFocus
+              className="w-full text-lg font-medium border-b-2 border-lime-500 bg-transparent focus:outline-none py-1"
+            />
+          </label>
+          {setupError && <p className="text-sm text-red-600" role="alert">{setupError}</p>}
+          <button
+            type="submit"
+            disabled={setupSaving}
+            className="w-full bg-lime-500 text-white rounded-xl py-3 font-bold shadow active:bg-lime-600 disabled:opacity-60"
+          >
+            {setupSaving ? '登録中…' : '登録する'}
+          </button>
+        </form>
+      </section>
+    );
   }
 
   return (
