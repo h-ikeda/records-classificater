@@ -1,5 +1,5 @@
 import type { User } from 'firebase/auth';
-import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where, updateDoc, Timestamp, type Unsubscribe } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import NewTrip from './components/NewTrip';
 import { channelCollection, channelDoc } from '../firestore/channel';
@@ -44,6 +44,77 @@ function formatNumber(number: number) {
   return number.toFixed(6).replace(/\.?0*$/, '');
 }
 
+// 実機では、購読が「初回スナップショットもエラーも返さないまま止まる」ことが
+// ある（一時的な通信断や、ネイティブダイアログ表示の前後など）。リロードでしか
+// 復帰しないのを避けるため、初回が届かなければ購読を張り直す。
+const FIRST_SNAPSHOT_TIMEOUT_MS = 5000;
+const MAX_SUBSCRIBE_ATTEMPTS = 3;
+
+/**
+ * onSnapshot を張り直しつきで購読する。初回スナップショットが時間内に届かない
+ * か、エラーになった場合は購読を張り直し、上限まで駄目なら onGiveUp を呼ぶ。
+ *
+ * `subscribe` は「毎回まっさらな状態から購読する」ように書くこと。張り直すと
+ * 最初のスナップショットで全件が改めて届くため、積み上げ式に持つ状態は
+ * subscribe の中で捨てる必要がある。
+ */
+function subscribeWithRetry(
+  subscribe: (onFirstSnapshot: () => void, onError: () => void) => Unsubscribe,
+  onGiveUp: () => void,
+): Unsubscribe {
+  let attempts = 0;
+  let generation = 0;
+  let unsubscribe: Unsubscribe | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  function clearTimer() {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  }
+
+  function start() {
+    const gen = generation += 1;
+    attempts += 1;
+    let received = false;
+    // 見張りを先に仕掛ける。世代を見ているので、張り直したあとに古い見張りが
+    // 起きても何もしない
+    timer = setTimeout(() => {
+      if (!received && gen === generation) restart();
+    }, FIRST_SNAPSHOT_TIMEOUT_MS);
+    const unsub = subscribe(() => {
+      received = true;
+      if (gen === generation) clearTimer();
+    }, () => {
+      if (gen === generation) restart();
+    });
+    // subscribe がその場でエラーを返した場合は既に次の世代へ進んでいるため、
+    // ここで取り違えないようにする
+    if (gen === generation) unsubscribe = unsub;
+    else unsub();
+  }
+
+  function restart() {
+    clearTimer();
+    unsubscribe?.();
+    unsubscribe = null;
+    if (stopped) return;
+    if (attempts >= MAX_SUBSCRIBE_ATTEMPTS) {
+      onGiveUp();
+      return;
+    }
+    start();
+  }
+
+  start();
+  return () => {
+    stopped = true;
+    clearTimer();
+    unsubscribe?.();
+    unsubscribe = null;
+  };
+}
+
 export default function TripClassificater({ currentUser }: { currentUser: User }) {
   // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
   const db = getFirestore();
@@ -68,7 +139,8 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setVehiclesLoaded(false);
     setLoadError('');
     migrating.current = false;
-    const unsubUser = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
+    const unsubUser = subscribeWithRetry((onFirstSnapshot, onError) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
+      onFirstSnapshot();
       if (!snapshot.exists()) {
         // 旧データからの移行（初回登録を含む）
         if (migrating.current) return;
@@ -117,27 +189,33 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
       if (migrating.current) return;
       setCurrentVehicleId(snapshot.data().state.vehicle);
       setUserLoaded(true);
-    }, () => {
+    }, onError), () => {
       setLoadError('データの読み込みに失敗しました');
       setUserLoaded(true);
     });
-    const unsubVehicles = onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ doc, type }) => {
-        setVehicles((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => doc.id === id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
+    const unsubVehicles = subscribeWithRetry((onFirstSnapshot, onError) => {
+      // 張り直すと全件が改めて 'added' で届くため、積み上げた一覧は捨てる
+      setVehicles([]);
+      return onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
+        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+        onFirstSnapshot();
+        setVehiclesLoaded(true);
+        snapshot.docChanges().forEach(({ doc, type }) => {
+          setVehicles((prev) => {
+            if (type === 'added') {
+              return [...prev, { ...doc.data(), id: doc.id }];
+            }
+            const i = prev.findIndex(({ id }) => doc.id === id);
+            if (i < 0) return prev;
+            if (type === 'modified') {
+              const next = [...prev];
+              next[i] = { ...doc.data(), id: doc.id };
+              return next;
+            }
+            return prev.filter((_, idx) => idx !== i);
+          });
         });
-      });
-      setVehiclesLoaded(true);
+      }, onError);
     }, () => {
       setLoadError('車両一覧の読み込みに失敗しました');
       setVehiclesLoaded(true);
@@ -154,29 +232,35 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setVehicleClasses([]);
     setTripsLoaded(false);
     if (!currentVehicleId) return;
-    const unsubVehicle = onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+    const unsubVehicle = subscribeWithRetry((onFirstSnapshot, onError) => onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+      onFirstSnapshot();
       setVehicleClasses(snapshot.data()?.classes || []);
-    }, () => {
+    }, onError), () => {
       setVehicleClasses([]);
     });
-    const unsubTrips = onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
-      snapshot.docChanges().forEach(({ type, doc }) => {
-        setTrips((prev) => {
-          if (type === 'added') {
-            return [...prev, { ...doc.data(), id: doc.id }];
-          }
-          const i = prev.findIndex(({ id }) => id === doc.id);
-          if (i < 0) return prev;
-          if (type === 'modified') {
-            const next = [...prev];
-            next[i] = { ...doc.data(), id: doc.id };
-            return next;
-          }
-          return prev.filter((_, idx) => idx !== i);
+    const unsubTrips = subscribeWithRetry((onFirstSnapshot, onError) => {
+      // 張り直すと全件が改めて 'added' で届くため、積み上げた一覧は捨てる
+      setTrips([]);
+      return onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
+        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+        onFirstSnapshot();
+        setTripsLoaded(true);
+        snapshot.docChanges().forEach(({ type, doc }) => {
+          setTrips((prev) => {
+            if (type === 'added') {
+              return [...prev, { ...doc.data(), id: doc.id }];
+            }
+            const i = prev.findIndex(({ id }) => id === doc.id);
+            if (i < 0) return prev;
+            if (type === 'modified') {
+              const next = [...prev];
+              next[i] = { ...doc.data(), id: doc.id };
+              return next;
+            }
+            return prev.filter((_, idx) => idx !== i);
+          });
         });
-      });
-      // 空の走行記録と読み込み前を区別できるよう、最初のスナップショットで完了とする
-      setTripsLoaded(true);
+      }, onError);
     }, () => {
       setLoadError('走行記録の読み込みに失敗しました');
       setTripsLoaded(true);
