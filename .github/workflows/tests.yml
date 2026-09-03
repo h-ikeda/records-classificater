@@ -11,8 +11,10 @@ permissions:
   contents: read
 
 jobs:
+  # ジョブ名（＝チェック名）は "test" のままにしておくこと。リポジトリの
+  # ルールセットが必須チェックとして "test" を指名しているため、ここを変えると
+  # そのチェックが現れなくなり、PR がマージできなくなる。
   test:
-    name: Firestore rules (emulator)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
