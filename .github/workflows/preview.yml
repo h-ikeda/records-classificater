@@ -98,9 +98,16 @@ jobs:
           echo "url=$(jq -r '.result | to_entries[0].value.url' channel.json)" >> "$GITHUB_OUTPUT"
       - name: Authorize the preview URL for Firebase Auth
         # プレビュー URL は本番とは別のホスト名になるため、承認済みドメインに
-        # 入れておかないと Google ログインが弾かれる。チャンネル URL の
-        # ハッシュはチャンネル名から決まる（push しても変わらない）ので、
-        # 追加は PR につき一度で済む。削除は preview-cleanup.yml が行う。
+        # 入れておかないと Google ログインが弾かれる。通常は
+        # hosting:channel:deploy がチャンネル URL を自動で登録するため、ここは
+        # 「登録されていること」の確認に落ち着き、書き込みは欠けていたときだけ
+        # 起きる。
+        #
+        # URL のハッシュはチャンネルが生きている間は変わらないので、push を
+        # 重ねても追加は一度で済む。ただしチャンネルが失効した後に再デプロイ
+        # すると別のハッシュになり、古いホスト名が承認済みドメインに残る。
+        # preview-cleanup.yml が「--pr-<番号>-」を含むホストを *すべて* 消すのは
+        # このため。
         #
         # この API は配列を渡すと **全置換** する。取得に失敗したり空が返って
         # きたりしたときにそのまま PATCH すると、本番のドメインごと消える。
