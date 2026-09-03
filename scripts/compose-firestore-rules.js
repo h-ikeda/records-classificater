@@ -48,6 +48,21 @@ const CHANNEL_PATTERN = /^pr-\d+$/;
 // 増えるほど大きくなるため、ここが効くのは PR を溜めすぎたときになる。
 const DEFAULT_MAX_BYTES = 60 * 1024;
 
+/**
+ * 区間の目印の状態を返す。
+ *
+ *   'present' … 目印が揃っている（そのブランチが独自のルールを持っている）
+ *   'absent'  … 目印が無い（この仕組みより前から出ているブランチ）
+ *   'broken'  … 数が合わない（書きかけ・壊れている）
+ */
+function regionState(text) {
+  const begins = text.split(BEGIN).length - 1;
+  const ends = text.split(END).length - 1;
+  if (begins === 1 && ends === 1) return 'present';
+  if (begins === 0 && ends === 0) return 'absent';
+  return 'broken';
+}
+
 /** BEGIN / END に挟まれた区間を取り出す。 */
 function extractRegion(text, label) {
   const begins = text.split(BEGIN).length - 1;
@@ -160,7 +175,8 @@ function reindent(text, spaces) {
  *   このチャンネルだけは、検証に落ちたら例外にする（＝今デプロイしようとしている
  *   PR。ほかの PR のルールが壊れていても、そのせいで全体のデプロイを止めない）
  * @param {number} [options.maxBytes] 合成結果のサイズ上限
- * @returns {{text: string, included: string[], skipped: {channel: string, reason: string}[]}}
+ * @returns {{text: string, included: string[], fellBack: string[],
+ *   skipped: {channel: string, reason: string}[]}}
  */
 function composeRules({
   production,
@@ -175,6 +191,8 @@ function composeRules({
   const blocks = [];
   const included = [];
   const skipped = [];
+  // 目印が無く、main の区間で代用したチャンネル
+  const fellBack = [];
 
   for (const { channel, rules, label } of previews) {
     const name = label ? `${channel}（${label}）` : channel;
@@ -182,11 +200,25 @@ function composeRules({
       if (!CHANNEL_PATTERN.test(channel)) {
         throw new Error(`チャンネル名は pr-<番号> の形である必要があります: ${channel}`);
       }
-      const region = extractRegion(rules, `${name} のルール`);
-      assertSelfContained(region, `${name} のルール`);
+      // 目印が無いブランチは、この仕組みより前から出ているもの。独自のルールを
+      // 持っていないということなので、main の区間をそのまま使う。ここでエラーに
+      // すると、ルールに触っていない既存の PR がプレビューを出せなくなる。
+      //
+      // 目印が「壊れている」（数が合わない）場合はフォールバックしない。書きかけ
+      // なのか消し忘れなのか分からないものを、黙って main のルールで動かすと、
+      // 意図と違うものを見せることになるため。
+      const state = regionState(rules);
+      let region;
+      if (state === 'absent') {
+        region = productionRegion;
+        fellBack.push(channel);
+      } else {
+        region = extractRegion(rules, `${name} のルール`);
+        assertSelfContained(region, `${name} のルール`);
+      }
       const nested = rewriteRootPaths(region, channel, `${name} のルール`);
       blocks.push(`
-  // ---- プレビュー ${name} ----
+  // ---- プレビュー ${name}${state === 'absent' ? '（main のルールを使用）' : ''} ----
   match /databases/{database}/documents {
     match /preview-channels/${channel} {
 ${reindent(nested, 6)}
@@ -224,7 +256,7 @@ ${blocks.join('')}}
     );
   }
 
-  return { text, included, skipped };
+  return { text, included, skipped, fellBack };
 }
 
 /** ディレクトリに並んだ <チャンネル>.rules を読み込む。 */
@@ -259,12 +291,17 @@ if (require.main === module) {
     if (!args.production) {
       throw new Error('--production <本番ルールのパス> は必須です');
     }
-    const { text, included, skipped } = composeRules({
+    const { text, included, skipped, fellBack } = composeRules({
       production: fs.readFileSync(args.production, 'utf8'),
       previews: args.previews ? readPreviewDir(args.previews) : [],
       productionLabel: args['production-label'] || args.production,
       requiredChannel: args['required-channel'],
     });
+    if (fellBack.length) {
+      process.stderr.write(
+        `区間の目印が無いため main のルールで代用したチャンネル: ${fellBack.join(', ')}\n`,
+      );
+    }
     for (const { channel, reason } of skipped) {
       // 壊れている PR のルールは飛ばす。1 つの PR のせいで、ほかの PR や本番の
       // デプロイまで止まると困るため。飛ばしたことは見えるようにしておく。

@@ -488,9 +488,50 @@ describe('rules composition', () => {
     })).toThrow(/ルートの絶対参照/);
   });
 
-  test('区間の目印が無いファイルは拒否される', () => {
+  test('本番のルールに区間の目印が無ければ拒否される', () => {
     expect(() => composeRules({ production: "rules_version = '2';" }))
       .toThrow(/区間の目印/);
+  });
+
+  // この仕組みより前から出ているブランチには目印が無い。そこでエラーにすると、
+  // ルールに触っていない既存の PR がプレビューを出せなくなる。
+  test('目印の無いブランチは main の区間で代用される', () => {
+    const legacy = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /vehicles/{vid} {
+      allow read: if false;
+    }
+  }
+}`;
+    const composed = composeRules({
+      production: PRODUCTION_RULES,
+      previews: [{ channel: 'pr-243', rules: legacy }],
+      requiredChannel: 'pr-243',
+    });
+    expect(composed.included).toEqual(['pr-243']);
+    expect(composed.fellBack).toEqual(['pr-243']);
+    expect(composed.skipped).toEqual([]);
+    // ブランチ側の内容ではなく main の区間が入る
+    expect(composed.text).toContain('preview-channels/pr-243');
+    expect(composed.text).toContain('isValidNewUser');
+  });
+
+  test('目印の数が合わないブランチは代用せず拒否される', () => {
+    // 書きかけ・消し忘れを黙って main のルールで動かすと、意図と違うものを
+    // 見せることになる。
+    const half = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    ${BEGIN}
+    match /vehicles/{vid} { allow read: if false; }
+  }
+}`;
+    expect(() => composeRules({
+      production: PRODUCTION_RULES,
+      previews: [{ channel: 'pr-243', rules: half }],
+      requiredChannel: 'pr-243',
+    })).toThrow(/区間の目印/);
   });
 });
 
