@@ -1,0 +1,79 @@
+name: Preview build
+
+# PR のコードをビルドして、デプロイに渡す成果物を作るだけのワークフロー。
+#
+# **ここには秘密情報を一切渡さない。** PR のコードは PR の作者が自由に書ける
+# （package.json のインストールスクリプトも、ビルド設定も）。それを動かす場所に
+# デプロイ用の資格情報があると、認証後にそれを外へ送る細工ができてしまう。
+# 資格情報を使う工程は preview-deploy.yml に分け、そちらは main のコンテキストで
+# 動かしている（README「PR プレビュー」参照）。
+#
+# このワークフローは何もデプロイしない。成果物を artifact に置いて終わる。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# 同じ PR への連続 push は最後のものだけ通ればよい。
+concurrency:
+  group: preview-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# 読み取りだけ。コメントも書き込みもデプロイ側が行う。
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build preview artifact
+    runs-on: ubuntu-latest
+    env:
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build for the preview channel
+        # PREVIEW_CHANNEL はビルド時に Parcel が埋め込む。これが読み書き先を
+        # preview-channels/pr-<番号>/ へ振り替える唯一のスイッチ。
+        env:
+          PREVIEW_CHANNEL: pr-${{ github.event.pull_request.number }}
+        run: |
+          npm ci
+          npm run build
+      - name: Check that the channel is baked into the bundle
+        # 渡し忘れ・変数名の取り違えは、ビルドもデプロイも成功したまま
+        # 「プレビューが本番データを読み書きする」という形で表に出る。
+        # 出す前にここで確かめる（.map ではなく実際に配信される JS を見る）。
+        run: |
+          if ! grep -l "preview-channels" dist/*.js >/dev/null 2>&1 \
+            || ! grep -l "pr-$PR" dist/*.js >/dev/null 2>&1; then
+            echo "::error::ビルド成果物にチャンネル pr-$PR が埋め込まれていません（PREVIEW_CHANNEL の渡し漏れ）"
+            exit 1
+          fi
+          echo "チャンネル pr-$PR がバンドルに埋め込まれています"
+      - name: Stage the artifact
+        # 渡すのは配信するファイルだけ。firestore.rules は載せない（デプロイ側が
+        # 開いている PR 全部のルールを GitHub API から集め直すため）。
+        #
+        # meta.json は突き合わせ用。デプロイ側は PR 番号をこれではなく API から
+        # 引き直し、食い違っていれば止める（成果物は PR 側で作られるため、
+        # ここに書かれた値をそのまま信じることはできない）。
+        run: |
+          mkdir -p artifact
+          cp -r dist artifact/dist
+          printf '{"pr":%s,"sha":"%s"}\n' "$PR" '${{ github.event.pull_request.head.sha }}' \
+            > artifact/meta.json
+          cat artifact/meta.json
+      - name: Upload the artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: preview
+          path: artifact
+          retention-days: 1
+          if-no-files-found: error

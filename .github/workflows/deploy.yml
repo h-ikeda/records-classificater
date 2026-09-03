@@ -1,0 +1,84 @@
+name: Deploy
+
+# main への push で本番へデプロイする。
+#
+# Firestore のセキュリティルールもここで一緒に配ります。ルールはプロジェクトに
+# 対して 1 つで、PR プレビュー（preview-channels/pr-<番号> 配下）もそのルールに
+# 従うため、手元からの手動デプロイ任せにしておくと「プレビューだけが通らない」
+# 状態を作りやすいためです。
+
+on:
+  push:
+    branches:
+      - main
+
+# main への push が続いたとき、複数の run が並行して Firebase を更新すると、
+# 古い run が新しい run を上書きしうる。実行中のデプロイは中断せず（中途半端な
+# 状態で止めない）、後続は待たせる。
+#
+# 同じ group で待機できる run は 1 つだけで、新しい待機 run が古い待機 run を
+# 置き換える。連続 push では「実行中のもの」と「最後の push」だけが走ることに
+# なり、最終状態は最新のコミットになる。
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Firebase Hosting + Firestore rules
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # 開いている PR の firestore.rules を読むために必要。
+      pull-requests: read
+    env:
+      PROJECT_ID: records-classificater
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build
+        # PREVIEW_CHANNEL は渡さない。本番のデータはコレクションのルート直下。
+        run: |
+          npm ci
+          npm run build
+      - name: Collect the preview rules of every open pull request
+        # 本番のデプロイでも、開いている PR ぶんのプレビュー用ルールを組み込む。
+        # ここで落とすと、マージのたびに開いている PR のプレビューのルールが
+        # 消えてしまう。
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/collect-preview-rules.js --repo '${{ github.repository }}' --out previews
+      - name: Compose the security rules
+        # 本番の区間は firestore.rules（＝この push の内容）、プレビューの区間は
+        # チャンネルごとに各 PR のものを使う。
+        run: |
+          node scripts/compose-firestore-rules.js \
+            --production firestore.rules \
+            --previews previews \
+            --production-label "main" \
+            --out firestore.composed.rules
+          echo "--- 実際にデプロイするルール ---"
+          cat firestore.composed.rules
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+      - name: Deploy to Firebase Hosting and Firestore rules
+        # google-github-actions/auth が書き出す ADC（GOOGLE_APPLICATION_CREDENTIALS）
+        # を firebase-tools がそのまま利用する。
+        #
+        # CLI は package.json / lockfile で固定したものを使う（--no-install で
+        # 取りに行かせない）。デプロイ用サービスアカウントの認証が済んだ後に
+        # npm の latest タグを引くと、その時点の中身を検証なしに実行することに
+        # なるため。tests.yml・preview*.yml も同じ CLI を使う。
+        run: |
+          npx --no-install firebase deploy \
+            --only hosting,firestore:rules \
+            --project "$PROJECT_ID" \
+            --non-interactive

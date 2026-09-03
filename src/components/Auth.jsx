@@ -3,7 +3,10 @@ import SignInWithTestEmailPassword from './SignInWithTestEmailPassword';
 import SignOut from './SignOut';
 import DeleteAccount from './DeleteAccount';
 
-const dev = process.env.PROJECT_ID !== 'records-classificater';
+// テスト用のメール／パスワードログインとアカウント削除は、エミュレータに
+// つないでいるローカル開発でだけ出す。PR プレビューは本番と同じ Firebase
+// プロジェクト（＝本番と同じ利用者アカウント）を使うため、本番と同じ
+// Google ログインになる（README「PR プレビュー」参照）。
 const local = process.env.NODE_ENV !== 'production';
 
 export default function Auth({ currentUser = null }) {
@@ -12,7 +15,7 @@ export default function Auth({ currentUser = null }) {
       {local && currentUser && <DeleteAccount currentUser={currentUser} />}
       {currentUser ? (
         <SignOut />
-      ) : dev ? (
+      ) : local ? (
         <SignInWithTestEmailPassword />
       ) : (
         <SignInWithGoogle />
