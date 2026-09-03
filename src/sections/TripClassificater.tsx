@@ -2,7 +2,7 @@ import type { User } from 'firebase/auth';
 import { getFirestore, onSnapshot, doc, addDoc, query, writeBatch, getDoc, where, updateDoc, Timestamp } from 'firebase/firestore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import NewTrip from './components/NewTrip';
-import { channelCollection, channelDoc } from '../firestore/channel';
+import { channelCollection, channelDoc, previewChannel } from '../firestore/channel';
 import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
@@ -197,6 +197,36 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 車両が決まる前や切り替え直後は、記録が空でも「記録なし」とは判断しない
   const tripsLoading = !userLoaded || (!!currentVehicleId && !tripsLoaded);
 
+  // 症状の切り分け用。どの購読が返ってきていないかと、待っている時間を出す。
+  // 「読み込み中のまま止まる」ときに、4 つの購読のどれが原因かを画面から判別
+  // できるようにするためのもので、プレビューとローカル開発でだけ表示する
+  const showDiagnostics = previewChannel !== null || process.env.NODE_ENV !== 'production';
+  const pending = [
+    !userLoaded && 'ユーザー情報',
+    !vehiclesLoaded && '車両一覧',
+    !!currentVehicleId && !tripsLoaded && '走行記録',
+  ].filter(Boolean).join(' / ');
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!pending) {
+      setWaitingSeconds(0);
+      return;
+    }
+    const started = Date.now();
+    const id = setInterval(() => setWaitingSeconds(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [pending]);
+
+  function Diagnostics() {
+    if (!showDiagnostics || !pending) return null;
+    return (
+      <p className="mt-2 text-center text-xs text-gray-400 tabular-nums">
+        待機中: {pending}（{waitingSeconds} 秒）
+      </p>
+    );
+  }
+
   function classStyle(cls: string) {
     const i = vehicleClasses.indexOf(cls);
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
@@ -338,7 +368,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             <button className="w-9 h-9 rounded-full border border-gray-300 text-gray-600 active:bg-gray-200" onClick={() => setCurrentYear((y) => y + 1)}>›</button>
           </div>
           {tripsLoading ? (
-            <Loader className="text-lime-500 text-2xl py-2" />
+            <>
+              <Loader className="text-lime-500 text-2xl py-2" />
+              <Diagnostics />
+            </>
           ) : Object.keys(classSummaries).length ? (
             <dl className="space-y-2">
               {Object.entries(classSummaries).map(([key, value]) => (
@@ -383,6 +416,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         {tripsLoading ? (
           <li className="py-10">
             <Loader className="text-lime-500 text-3xl" />
+            <Diagnostics />
           </li>
         ) : !displayTrips.length ? (
           <li className="text-center text-gray-400 py-10">
