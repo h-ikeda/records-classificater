@@ -19,13 +19,17 @@ name: Preview cleanup
 # 「もともと無い」を正常扱いにしたことでこのワークフローは冪等なので、途中で
 # 失敗しても原因を直して再実行すれば残りが片付く。
 
+# pull_request_target は **ベースブランチの定義** で動き、PR のコードは
+# チェックアウトしない。PR 側から書き換えられない場所で資格情報を使うため、
+# デプロイ側（preview-deploy.yml）と同じ考え方になる。
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
 
-# preview.yml と同じグループ。PR クローズ時に、まだ走っているデプロイを打ち切る。
+# preview-deploy.yml と同じグループ。PR クローズ時に、まだ走っているデプロイを
+# 打ち切る（あちらは PR 番号を知らないのでブランチ名で揃えてある）。
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ github.event.pull_request.head.ref }}
   cancel-in-progress: true
 
 jobs:

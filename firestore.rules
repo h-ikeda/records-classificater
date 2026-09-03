@@ -2,15 +2,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 本番のコレクションはルート直下に、PR プレビューのコレクションは
-    // preview-channels/pr-<番号>/ 配下に、同じ形で並ぶ（README「チャンネル」参照）。
-    // ルールはプロジェクト単位で 1 つなので、両方をここで面倒みる。
+    // ここに書くのは **本番のルールだけ** です。コレクションはルート直下に
+    // ある前提で書いてください。
     //
-    // 判定条件は関数にまとめ、二重に書くのは match の入れ子だけにしてある。
-    // 条件そのものを二度書くと、片方だけ直したときに「プレビューでだけ通る／
-    // 落ちる」という追いにくい差になるため。テスト（test/firestore-rules.spec.ts）
-    // は同じケースを本番パスとプレビューパスの両方に流して、差が出ないことを
-    // 確かめている。
+    // PR プレビュー用のルールは、デプロイのときに
+    // scripts/compose-firestore-rules.js が下の区間を丸ごと取り出し、
+    // preview-channels/<チャンネル>/ 配下へ入れ子にして生成します。だから
+    // ここにプレビューのことを書く必要はありませんし、書いてもいけません
+    // （二重管理になり、片方だけ直したときに食い違います）。
+    //
+    // 区間の目印（APP RULES BEGIN / END）は合成スクリプトが探します。動かす
+    // ときは scripts/compose-firestore-rules.js も合わせて直してください。
+    //
+    // 区間の中からルートを絶対パスで参照するときは、必ず
+    // /databases/$(database)/documents の形で書いてください。合成時にこの
+    // 文字列をプレビューのパスへ置き換えます。ほかの書き方をすると、
+    // 合成スクリプトがエラーで止まります。
+
+    // === APP RULES BEGIN ===
 
     function isSignedIn() {
       return request.auth != null;
@@ -18,13 +27,6 @@ service cloud.firestore {
 
     function isSignedInAs(uid) {
       return isSignedIn() && request.auth.uid == uid;
-    }
-
-    // プレビューのチャンネル名は PR 番号から決まる。この形以外を弾いておかないと、
-    // preview-channels 配下に後片付け（preview-cleanup.yml が消すのは
-    // preview-channels/pr-<番号> だけ）の届かないデータを作れてしまう。
-    function isPreviewChannel(channel) {
-      return channel.matches('^pr-[0-9]+$');
     }
 
     function isValidNewUser(incoming) {
@@ -74,8 +76,6 @@ service cloud.firestore {
       return incoming.class in get(vehicle).data.classes;
     }
 
-    // ---- 本番（ルート直下） ----
-
     match /trips/{uid} {
       allow read, write: if isSignedInAs(uid);
     }
@@ -104,46 +104,7 @@ service cloud.firestore {
       }
     }
 
-    // ---- PR プレビュー（preview-channels/pr-<番号>/ 配下） ----
+    // === APP RULES END ===
 
-    match /preview-channels/{channel} {
-
-      match /trips/{uid} {
-        allow read, write: if isPreviewChannel(channel)
-          && isSignedInAs(uid);
-      }
-
-      match /users/{uid} {
-        allow get: if isPreviewChannel(channel)
-          && isSignedInAs(uid);
-        allow create: if isPreviewChannel(channel)
-          && isSignedInAs(uid)
-          && isValidNewUser(request.resource.data);
-        allow update: if isPreviewChannel(channel)
-          && isSignedInAs(uid)
-          && isValidUserUpdate(request.resource.data, resource.data);
-      }
-
-      match /vehicles/{vid} {
-        allow create: if isPreviewChannel(channel)
-          && isSignedIn()
-          && isValidNewVehicle(request.resource.data);
-        allow list, get: if isPreviewChannel(channel)
-          && isSignedIn()
-          && request.auth.uid in resource.data.permissions.read;
-        allow update: if isPreviewChannel(channel)
-          && isSignedIn()
-          && request.auth.uid in resource.data.permissions.write
-          && isValidVehicleUpdate(request.resource.data, resource.data);
-
-        match /trips/{tid} {
-          allow get, list: if isPreviewChannel(channel)
-            && canReadVehicle(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid));
-          allow create: if isPreviewChannel(channel)
-            && canWriteVehicle(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid))
-            && isValidNewTrip(/databases/$(database)/documents/preview-channels/$(channel)/vehicles/$(vid), request.resource.data);
-        }
-      }
-    }
   }
 }

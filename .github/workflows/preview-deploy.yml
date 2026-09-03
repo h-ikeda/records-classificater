@@ -1,0 +1,262 @@
+name: Preview deploy
+
+# preview-build.yml が作った成果物を、実際に Firebase へ出す工程。
+#
+# **workflow_run は main のコンテキストで動く。** 走るワークフローの定義も、
+# チェックアウトされるコードも既定ブランチのものになるため、PR 側から書き換え
+# られない。デプロイ用の資格情報を使うのはここだけで、PR のコードはこの中で
+# 一度も実行しない（成果物を配るだけ）。
+#
+# PR 側から来るのは次の 2 つだけで、どちらも信頼しない入力として扱う。
+#
+#   dist/           … 配信するファイル。プレビューとはそもそもこれを見るもの
+#   firestore.rules … main の本番用ルールと合成し、プレビューのパス配下へ
+#                     入れ子にする。入れ子から出られないことは
+#                     scripts/compose-firestore-rules.js が検証する
+#
+# PR 番号は成果物の meta.json ではなく API から引き直す。成果物は PR 側で作られる
+# ため、そこに書かれた番号をそのまま信じると、別の PR のチャンネルへ出させる
+# ことができてしまう。
+#
+# 注意: workflow_run の実行は PR のチェック一覧には出ない。結果は PR コメントに
+# 出す。また、このワークフローは **既定ブランチに存在して初めて動く** ため、
+# これを追加する PR 自身のプレビューはマージされるまで更新されない。
+
+on:
+  workflow_run:
+    workflows: ["Preview build"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    name: Deploy preview environment
+    # ビルドが失敗・キャンセルされたときは何もしない。
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: preview-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
+    env:
+      PROJECT_ID: records-classificater
+    steps:
+      - name: Resolve the pull request
+        id: pr
+        # 番号は成果物ではなく、ビルドを起こしたコミットから引き直す。
+        # 開いている PR であること、フォークではないことも合わせて確かめる。
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const { data: associated } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: sha,
+            });
+            const pr = associated.find((p) => p.state === 'open' && p.head.sha === sha);
+            if (!pr) {
+              core.setFailed(`コミット ${sha} に対応する開いている PR が見つかりません`);
+              return;
+            }
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.head.repo.full_name !== repo) {
+              core.setFailed(`フォーク（${pr.head.repo.full_name}）からの PR にはプレビューを出しません`);
+              return;
+            }
+            core.setOutput('number', String(pr.number));
+            core.setOutput('sha', sha);
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # 既定ブランチを明示する。workflow_run のチェックアウト先を暗黙に
+          # 任せると、意図と違うものを取ってくる余地が残るため。
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        # main の lockfile で入れる。PR 側の package.json は使わない
+        # （インストールスクリプトを踏まないため）。
+        run: npm ci
+      - name: Download the preview artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: preview
+          path: incoming
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Check the artifact
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          for f in incoming/meta.json incoming/firestore.rules incoming/dist/index.html; do
+            [ -f "$f" ] || { echo "::error::成果物に $f がありません"; exit 1; }
+          done
+          meta_pr="$(jq -r '.pr' incoming/meta.json)"
+          meta_sha="$(jq -r '.sha' incoming/meta.json)"
+          if [ "$meta_pr" != "$PR_NUMBER" ] || [ "$meta_sha" != "$HEAD_SHA" ]; then
+            echo "::error::成果物の中身（PR $meta_pr / $meta_sha）が、API から引いた PR $PR_NUMBER / $HEAD_SHA と一致しません"
+            exit 1
+          fi
+          echo "PR=$PR_NUMBER" >> "$GITHUB_ENV"
+          echo "PR $PR_NUMBER（$HEAD_SHA）の成果物を受け取りました"
+      - name: Compose the security rules
+        # 本番の区間は main のもの、プレビューの区間は PR のものを使う。
+        # PR のルールは preview-channels/<チャンネル>/ 配下へ入れ子にされ、
+        # そこから出られないことを合成スクリプトが検証する。検証に落ちれば
+        # ここでジョブが止まり、何もデプロイされない。
+        run: |
+          node scripts/compose-firestore-rules.js \
+            --production firestore.rules \
+            --preview incoming/firestore.rules \
+            --production-label "main" \
+            --preview-label "PR #$PR (${{ steps.pr.outputs.sha }})" \
+            --out firestore.composed.rules
+          echo "--- 実際にデプロイするルール ---"
+          cat firestore.composed.rules
+      - name: Stage the built site
+        run: |
+          rm -rf dist
+          mv incoming/dist dist
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          credentials_json: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RECORDS_CLASSIFICATER }}'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Deploy the composed security rules
+        # ルールを先に出す。チャンネルより後にすると、プレビューが開いた直後の
+        # 読み書きがルール不在で弾かれる時間帯ができる。
+        run: |
+          npx --no-install firebase deploy \
+            --only firestore:rules \
+            --project "$PROJECT_ID" \
+            --non-interactive
+      - name: Deploy to preview channel
+        id: deploy
+        run: |
+          npx --no-install firebase hosting:channel:deploy "pr-$PR" \
+            --project "$PROJECT_ID" \
+            --expires 7d \
+            --non-interactive \
+            --json > channel.json
+          echo "url=$(jq -r '.result | to_entries[0].value.url' channel.json)" >> "$GITHUB_OUTPUT"
+      - name: Authorize the preview URL for Firebase Auth
+        # 通常は hosting:channel:deploy がチャンネル URL を自動で登録するため、
+        # ここは「登録されていること」の確認に落ち着き、書き込みは欠けていた
+        # ときだけ起きる。
+        #
+        # URL のハッシュはチャンネルが生きている間は変わらない。ただしチャンネル
+        # が失効した後に再デプロイすると別のハッシュになり、古いホスト名が残る。
+        # preview-cleanup.yml が「--pr-<番号>-」を含むホストを *すべて* 消すのは
+        # このため。
+        #
+        # この API は配列を渡すと **全置換** する。取得に失敗したり空が返って
+        # きたりしたときにそのまま PATCH すると、本番のドメインごと消える。
+        # 取得できたことを確かめてから追加し、書いたあとに「消えたものが無い」
+        # ことまで確認する。
+        env:
+          URL: '${{ steps.deploy.outputs.url }}'
+        run: |
+          host="${URL#https://}"
+          host="${host%%/*}"
+          case "$host" in
+            ''|*[!a-zA-Z0-9.-]*)
+              echo "::error::プレビュー URL からホスト名を取り出せませんでした: $URL"
+              exit 1
+              ;;
+          esac
+          api="https://identitytoolkit.googleapis.com/admin/v2/projects/$PROJECT_ID/config"
+          token="$(gcloud auth print-access-token)"
+          before="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          if [ "$(jq '.authorizedDomains | length' <<<"$before")" -eq 0 ]; then
+            echo "::error::承認済みドメインの一覧を取得できませんでした（本番のドメインを消さないよう中断します）"
+            exit 1
+          fi
+          if jq -e --arg h "$host" '.authorizedDomains | index($h)' <<<"$before" >/dev/null; then
+            echo "$host は既に承認済みドメインに入っています"
+            exit 0
+          fi
+          curl -sS --fail-with-body -X PATCH \
+            -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            "$api?updateMask=authorizedDomains" \
+            -d "$(jq --arg h "$host" '{authorizedDomains: (.authorizedDomains + [$h])}' <<<"$before")" \
+            > /dev/null
+          after="$(curl -sS --fail-with-body -H "Authorization: Bearer $token" "$api")"
+          if ! jq -e --arg h "$host" '.authorizedDomains | index($h)' <<<"$after" >/dev/null; then
+            echo "::error::$host を承認済みドメインに追加できませんでした"
+            exit 1
+          fi
+          lost="$(jq -r --argjson b "$(jq '.authorizedDomains' <<<"$before")" '$b - .authorizedDomains | join(", ")' <<<"$after")"
+          if [ -n "$lost" ]; then
+            echo "::error::承認済みドメインから消えたものがあります（要復旧）: $lost"
+            exit 1
+          fi
+          echo "承認済みドメインに $host を追加しました"
+      - name: Check that the preview URL is reachable
+        # デプロイの成否だけでなく、URL が実際に開けることを毎回確かめる。
+        # ここを省くと、URL を貼られた人が最初の失敗を踏むことになる。
+        env:
+          URL: '${{ steps.deploy.outputs.url }}'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)"
+            if [ "$code" = "200" ]; then
+              echo "疎通確認 OK: $URL"
+              exit 0
+            fi
+            echo "試行 $attempt: HTTP $code（チャンネルの反映待ちの可能性あり）"
+            sleep 10
+          done
+          echo "::error::プレビュー URL が開けません（最後の応答: HTTP $code）。$URL"
+          exit 1
+      - name: Comment preview URL on PR
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = '<!-- firebase-hosting-preview -->';
+            const body = [
+              marker,
+              '🔍 **プレビューデプロイ**: ${{ steps.deploy.outputs.url }}',
+              '',
+              '- コミット: ${{ steps.pr.outputs.sha }}',
+              '- チャンネル: `pr-${{ env.PR }}`（最終デプロイから 7 日で失効、push ごとに更新）',
+              '- データ: Firestore `preview-channels/pr-${{ env.PR }}/…`（本番と分離。空の状態から始まります）',
+              '- ルール: 本番の区間は `main`、プレビューの区間はこの PR のものを使って合成しています。',
+              '- ログインは **本番と同じ Google アカウント** です（同じ Firebase プロジェクトのため）。',
+              '',
+              'この URL での操作は `preview-channels/pr-${{ env.PR }}` 配下にのみ書き込まれ、本番のデータには影響しません。PR クローズ時にまとめて削除されます。',
+              '',
+              '> このデプロイは `main` のコンテキスト（`workflow_run`）で走るため、PR のチェック一覧には出ません。ビルドの成否は Preview build を見てください。',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR),
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: Number(process.env.PR),
+                body,
+              });
+            }

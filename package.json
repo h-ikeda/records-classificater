@@ -7,6 +7,7 @@
     "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/jest": "^30.0.0",
+    "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "buffer": "^6.0.3",
@@ -23,7 +24,10 @@
   "scripts": {
     "start": "firebase emulators:exec --only=auth,firestore parcel",
     "build": "parcel build",
-    "deploy:rules": "firebase --project records-classificater deploy --only firestore:rules",
+    "rules:compose": "node scripts/compose-firestore-rules.js --production firestore.rules --out firestore.composed.rules",
+    "prestart": "npm run rules:compose",
+    "pretest": "npm run rules:compose",
+    "deploy:rules": "npm run rules:compose && firebase --project records-classificater deploy --only firestore:rules",
     "test": "firebase --project demo-records-classificater emulators:exec jest"
   },
   "source": "src/index.html"

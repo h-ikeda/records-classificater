@@ -67,3 +67,6 @@ node_modules/
 
 /dist/
 /.parcel-cache
+
+# 合成されたセキュリティルール（scripts/compose-firestore-rules.js の生成物）
+firestore.composed.rules

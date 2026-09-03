@@ -1,5 +1,23 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, deleteField } from "@firebase/firestore";
 import { RulesTestEnvironment, assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
+
+// 合成スクリプトは素の CommonJS なので require で読む
+const { composeRules, BEGIN, END } = require('../scripts/compose-firestore-rules');
+
+const PRODUCTION_RULES = fs.readFileSync(path.join(__dirname, '..', 'firestore.rules'), 'utf8');
+
+// 実際にデプロイされるのは合成後のルールセットなので、テストもそれに当てる。
+// firestore.rules 単体（＝本番用）ではプレビューのパスにルールが無い。
+const COMPOSED_RULES = composeRules({ production: PRODUCTION_RULES });
+
+/** 本番用ルールの区間だけを差し替えた、ブランチ側のルールを作る。 */
+function withAppRules(body: string): string {
+  const start = PRODUCTION_RULES.indexOf(BEGIN) + BEGIN.length;
+  const end = PRODUCTION_RULES.indexOf(END);
+  return `${PRODUCTION_RULES.slice(0, start)}\n${body}\n${PRODUCTION_RULES.slice(end)}`;
+}
 
 function offsetHours(date: Date, hours: number): Date {
   const t = new Date(date);
@@ -8,9 +26,9 @@ function offsetHours(date: Date, hours: number): Date {
 }
 
 // 本番のコレクションはルート直下に、PR プレビューのコレクションは
-// preview-channels/pr-<番号>/ 配下に並ぶ（firestore.rules 参照）。判定条件は
-// 共通の関数にまとめてあるが、match の入れ子は二重に書かれているため、同じ
-// ケースを両方のパスへ流して差が出ないことを確かめる。
+// preview-channels/pr-<番号>/ 配下に並ぶ。プレビュー側は本番の区間を合成
+// スクリプトが入れ子にしたものなので、同じケースを両方のパスへ流して、
+// 入れ子にしても判定が変わらないことを確かめる。
 const roots: [string, string[]][] = [
   ['production', []],
   ['preview channel', ['preview-channels', 'pr-1']],
@@ -37,6 +55,7 @@ describe.each(roots)('Firestore security rules (%s)', (_label, root) => {
   beforeAll(async () => {
     env = await initializeTestEnvironment({
       projectId: 'demo-records-classificater',
+      firestore: { rules: COMPOSED_RULES },
     });
     uid = crypto.randomUUID().replace('-', '');
     readOnlyUid = crypto.randomUUID().replace('-', '');
@@ -399,15 +418,60 @@ describe.each(roots)('Firestore security rules (%s)', (_label, root) => {
   });
 });
 
-// preview-channels 配下は PR 番号のチャンネルだけを許す。ここが緩いと、後片付け
-// （preview-cleanup.yml は preview-channels/pr-<番号> だけを消す）の届かない
-// データを作れてしまう。
-describe('Firestore security rules (preview channel name)', () => {
+// ここからは「合成」そのものの性質を確かめる。本番のパスを支配するのは常に
+// main のルールで、ブランチのルールはプレビューのパスの外へ出られない、という
+// のがこの仕組みの拠り所なので、その 2 つを実際に動かして確認する。
+describe('rules composition', () => {
+  test('入れ子を抜け出そうとする区間は合成時に拒否される', () => {
+    // 包んでいる match を閉じてから、本番のパスに規則を足そうとする。
+    // 括弧の総数は合っているので、深さを見ていないと通ってしまう。
+    const escaping = withAppRules(`
+      match /harmless/{id} {
+        allow read: if true;
+      }
+    }
+  }
+  match /databases/{database}/documents {
+    match /vehicles/{vid} {
+      allow read, write: if true;
+    `);
+    expect(() => composeRules({ production: PRODUCTION_RULES, preview: escaping }))
+      .toThrow(/閉じ括弧が多すぎます|match \/databases/);
+  });
+
+  test('ルートの絶対参照が想定外の書き方なら拒否される', () => {
+    const odd = withAppRules(`
+      match /vehicles/{vid} {
+        allow get: if get(/databases/(default)/documents/vehicles/$(vid)).data.open == true;
+      }
+    `);
+    expect(() => composeRules({ production: PRODUCTION_RULES, preview: odd }))
+      .toThrow(/ルートの絶対参照/);
+  });
+
+  test('区間の目印が無いファイルは拒否される', () => {
+    expect(() => composeRules({ production: "rules_version = '2';" }))
+      .toThrow(/区間の目印/);
+  });
+});
+
+// ブランチのルールがどれだけ緩くても、本番のパスには一切届かないこと。
+// これが崩れると、PR がルールを書き換えるだけで本番のデータに手が届く。
+describe('Firestore security rules (a permissive branch ruleset)', () => {
   let env: RulesTestEnvironment;
 
   beforeAll(async () => {
+    // 「何でも許す」ブランチのルールで合成する
+    const permissive = withAppRules(`
+      match /{document=**} {
+        allow read, write: if true;
+      }
+    `);
     env = await initializeTestEnvironment({
       projectId: 'demo-records-classificater',
+      firestore: {
+        rules: composeRules({ production: PRODUCTION_RULES, preview: permissive }),
+      },
     });
   });
 
@@ -415,18 +479,26 @@ describe('Firestore security rules (preview channel name)', () => {
     await env.cleanup();
   });
 
-  test('a channel not named pr-<number> is denied', async () => {
+  test('プレビューのパスにはブランチのルールが効く', async () => {
+    // 未認証でも通る = 差し替えたルールが確かに適用されている
+    const firestore = env.unauthenticatedContext().firestore();
+    await assertSucceeds(setDoc(doc(firestore, 'preview-channels', 'pr-1', 'anything', 'x'), { a: 1 }));
+  });
+
+  test('本番のパスは main のルールのままで、ブランチのルールは届かない', async () => {
+    const firestore = env.unauthenticatedContext().firestore();
+    await Promise.all([
+      assertFails(setDoc(doc(firestore, 'vehicles', 'x'), { a: 1 })),
+      assertFails(setDoc(doc(firestore, 'users', 'x'), { state: { vehicle: 'v' } })),
+      assertFails(setDoc(doc(firestore, 'trips', 'x'), { data: [] })),
+      assertFails(getDoc(doc(firestore, 'vehicles', 'x'))),
+    ]);
+  });
+
+  test('本番のパスの検証は、認証済みでも main のルールで判断される', async () => {
     const user = crypto.randomUUID().replace('-', '');
     const firestore = env.authenticatedContext(user).firestore();
-    await Promise.all([
-      assertFails(setDoc(doc(firestore, 'preview-channels', 'staging', 'users', user), {
-        state: { vehicle: 'v' },
-      })),
-      assertFails(addDoc(collection(firestore, 'preview-channels', 'pr-x', 'vehicles'), {
-        classes: ['Business'],
-        name: 'カローラ',
-        permissions: { read: [user], write: [user] },
-      })),
-    ]);
+    // main のルールは users に state 以外のキーを許さない
+    await assertFails(setDoc(doc(firestore, 'users', user), { unapproved: 'value' }));
   });
 });
