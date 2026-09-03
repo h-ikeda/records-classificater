@@ -7,6 +7,7 @@ import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
 import { Vehicle, vehicleConverter } from '../firestore/definitions/Vehicle';
+import Loader from '../components/Loader';
 
 interface TripIdentified extends Trip {
   id: string,
@@ -52,39 +53,58 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   const [vehicles, setVehicles] = useState<VehicleIdentified[]>([]);
   const [trips, setTrips] = useState<TripIdentified[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
+  // 取得前の空データを「記録なし」と誤表示しないよう、読み込み完了を明示的に管理する
+  const [userLoaded, setUserLoaded] = useState(false);
+  const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
+  const [tripsLoaded, setTripsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     setVehicles([]);
+    setUserLoaded(false);
+    setVehiclesLoaded(false);
+    setLoadError('');
     const unsubUser = onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), async (snapshot) => {
       if (!snapshot.exists()) {
-        const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
-        const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
-          return acc.add(cls);
-        }, new Set<string>()));
-        const name = prompt('車の名称を入力してください');
-        const batch1 = writeBatch(db);
-        const newVehicle = doc(channelCollection(db, 'vehicles')).withConverter(vehicleConverter);
-        await batch1
-          .set(newVehicle, {
-            classes,
-            name: name || '',
-            permissions: {
-              read: [currentUser.uid],
-              write: [currentUser.uid],
-            },
-          })
-          .set(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), {
-            state: { vehicle: newVehicle.id },
-          })
-          .commit();
-        const batch2 = writeBatch(db);
-        oldTrips.forEach((trip) => {
-          batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
-        });
-        batch2.commit();
+        // 旧データからの移行。完了すると users ドキュメントが作られ、本コールバックが再度呼ばれる
+        try {
+          const { data: oldTrips } = (await getDoc(channelDoc(db, 'trips', currentUser.uid).withConverter(tripsConverter))).data() || { data: [] };
+          const classes = Array.from(oldTrips.reduce((acc, { class: cls }) => {
+            return acc.add(cls);
+          }, new Set<string>()));
+          const name = prompt('車の名称を入力してください');
+          const batch1 = writeBatch(db);
+          const newVehicle = doc(channelCollection(db, 'vehicles')).withConverter(vehicleConverter);
+          await batch1
+            .set(newVehicle, {
+              classes,
+              name: name || '',
+              permissions: {
+                read: [currentUser.uid],
+                write: [currentUser.uid],
+              },
+            })
+            .set(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), {
+              state: { vehicle: newVehicle.id },
+            })
+            .commit();
+          const batch2 = writeBatch(db);
+          oldTrips.forEach((trip) => {
+            batch2.set(doc(channelCollection(db, 'vehicles', newVehicle.id, 'trips')).withConverter(tripConverter), trip);
+          });
+          await batch2.commit();
+        } catch {
+          // 失敗時もローダーを解除し、画面が固まらないようにする
+          setLoadError('データの読み込みに失敗しました');
+          setUserLoaded(true);
+        }
         return;
       }
       setCurrentVehicleId(snapshot.data().state.vehicle);
+      setUserLoaded(true);
+    }, () => {
+      setLoadError('データの読み込みに失敗しました');
+      setUserLoaded(true);
     });
     const unsubVehicles = onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
       snapshot.docChanges().forEach(({ doc, type }) => {
@@ -102,6 +122,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           return prev.filter((_, idx) => idx !== i);
         });
       });
+      setVehiclesLoaded(true);
+    }, () => {
+      setLoadError('車両一覧の読み込みに失敗しました');
+      setVehiclesLoaded(true);
     });
     return () => {
       unsubUser();
@@ -110,10 +134,15 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   }, [currentUser]);
 
   useEffect(() => {
+    // 車両切り替え時は前の車両の記録を残さず、読み込み中として扱う
     setTrips([]);
+    setVehicleClasses([]);
+    setTripsLoaded(false);
     if (!currentVehicleId) return;
     const unsubVehicle = onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
       setVehicleClasses(snapshot.data()?.classes || []);
+    }, () => {
+      setVehicleClasses([]);
     });
     const unsubTrips = onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
       snapshot.docChanges().forEach(({ type, doc }) => {
@@ -131,6 +160,11 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           return prev.filter((_, idx) => idx !== i);
         });
       });
+      // 空の走行記録と読み込み前を区別できるよう、最初のスナップショットで完了とする
+      setTripsLoaded(true);
+    }, () => {
+      setLoadError('走行記録の読み込みに失敗しました');
+      setTripsLoaded(true);
     });
     return () => {
       unsubVehicle();
@@ -169,6 +203,11 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // trips はスナップショット順で時系列とは限らないため、ODO（単調増加）の最大値を最新値とする
   const lastODO = useMemo(() => trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [trips]);
 
+  // ユーザー情報と車両一覧が揃うまでは選択肢を確定できない
+  const vehiclesLoading = !userLoaded || !vehiclesLoaded;
+  // 車両が決まる前や切り替え直後は、記録が空でも「記録なし」とは判断しない
+  const tripsLoading = !userLoaded || (!!currentVehicleId && !tripsLoaded);
+
   function classStyle(cls: string) {
     const i = vehicleClasses.indexOf(cls);
     return classPalette[(i < 0 ? 0 : i) % classPalette.length];
@@ -201,14 +240,21 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           <select
             onChange={setCurrentVehicle}
             value={currentVehicleId ?? ''}
-            className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500"
+            disabled={vehiclesLoading}
+            className="grow min-w-0 text-lg font-medium py-2 px-3 rounded-lg border border-gray-300 bg-white focus:outline-none focus:border-lime-500 disabled:text-gray-400"
           >
+            {/* 選択中の車両が一覧に現れるまでは、空表示ではなく状態を示す選択肢を出す */}
+            {!vehicles.some(({ id }) => id === currentVehicleId) && (
+              <option value={currentVehicleId ?? ''}>{vehiclesLoading ? '読み込み中…' : '車両がありません'}</option>
+            )}
             {vehicles.map(({ id, name }) => (
               <option key={id} value={id}>{name}</option>
             ))}
           </select>
         </label>
       </section>
+
+      {loadError && <p className="mt-3 text-sm text-red-600 text-center" role="alert">{loadError}</p>}
 
       {/* 年間集計（確認頻度は低いので折りたたみ） */}
       <details className="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
@@ -222,7 +268,9 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             <span className="font-black text-lg tabular-nums">{currentYear}</span>
             <button className="w-9 h-9 rounded-full border border-gray-300 text-gray-600 active:bg-gray-200" onClick={() => setCurrentYear((y) => y + 1)}>›</button>
           </div>
-          {Object.keys(classSummaries).length ? (
+          {tripsLoading ? (
+            <Loader className="text-lime-500 text-2xl py-2" />
+          ) : Object.keys(classSummaries).length ? (
             <dl className="space-y-2">
               {Object.entries(classSummaries).map(([key, value]) => (
                 <div key={key} className="flex items-center gap-3">
@@ -263,11 +311,17 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             </div>
           </li>
         ))}
-        {!displayTrips.length && (
-          <li className="text-center text-gray-400 py-10">
-            まだ記録がありません。<br />下のボタンから追加できます。
+        {tripsLoading ? (
+          <li className="py-10">
+            <Loader className="text-lime-500 text-3xl" />
           </li>
-        )}
+        ) : !displayTrips.length ? (
+          <li className="text-center text-gray-400 py-10">
+            {currentVehicleId ? (
+              <>まだ記録がありません。<br />下のボタンから追加できます。</>
+            ) : '車両が選択されていません。'}
+          </li>
+        ) : null}
       </ul>
 
       {/* 記録追加（主要操作なので画面下端に固定バーで常時表示） */}
