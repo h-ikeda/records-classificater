@@ -42,6 +42,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        # firebase CLI を lockfile で固定したもので動かすため（deploy.yml 参照）。
+        run: npm ci
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -52,7 +60,7 @@ jobs:
         # チャンネルは最終デプロイから 7 日で自動失効するため、クローズ時点で
         # 既に無いことが普通にある。
         run: |
-          if out="$(npx firebase-tools@latest hosting:channel:delete "pr-$PR" \
+          if out="$(npx --no-install firebase hosting:channel:delete "pr-$PR" \
               --project "$PROJECT_ID" --force 2>&1)"; then
             echo "$out"
           elif grep -qiE '404|not found|does not exist' <<<"$out"; then
@@ -110,7 +118,7 @@ jobs:
         # 失敗して非ゼロになる。つまり非ゼロは常に本物の失敗であり、そのまま
         # ジョブを落としてよい。
         run: |
-          npx firebase-tools@latest firestore:delete "preview-channels/pr-$PR" \
+          npx --no-install firebase firestore:delete "preview-channels/pr-$PR" \
             --recursive \
             --force \
             --project "$PROJECT_ID"

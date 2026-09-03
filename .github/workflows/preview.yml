@@ -88,8 +88,9 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
       - name: Deploy to preview channel
         id: deploy
+        # CLI は lockfile で固定したものを使う（deploy.yml 参照）。
         run: |
-          npx firebase-tools@latest hosting:channel:deploy "pr-$PR" \
+          npx --no-install firebase hosting:channel:deploy "pr-$PR" \
             --project "$PROJECT_ID" \
             --expires 7d \
             --non-interactive \

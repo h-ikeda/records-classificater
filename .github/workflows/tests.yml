@@ -30,9 +30,9 @@ jobs:
           java-version: '25'
           distribution: oracle
       - name: Install dependencies
+        # firebase CLI も devDependency として lockfile で固定してあるため、
+        # グローバル導入は要らない（同じ commit なら同じ CLI でテストされる）。
         run: npm ci
-      - name: Install firebase-tools
-        run: npm i -g firebase-tools
       - name: Run rules tests
         # emulators:exec がエミュレータの起動・終了を面倒みる。テストは
         # demo- 接頭辞のプロジェクトで動くため、認証も実プロジェクトも要らない。

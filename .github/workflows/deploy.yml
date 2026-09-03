@@ -12,6 +12,17 @@ on:
     branches:
       - main
 
+# main への push が続いたとき、複数の run が並行して Firebase を更新すると、
+# 古い run が新しい run を上書きしうる。実行中のデプロイは中断せず（中途半端な
+# 状態で止めない）、後続は待たせる。
+#
+# 同じ group で待機できる run は 1 つだけで、新しい待機 run が古い待機 run を
+# 置き換える。連続 push では「実行中のもの」と「最後の push」だけが走ることに
+# なり、最終状態は最新のコミットになる。
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Firebase Hosting + Firestore rules
@@ -41,8 +52,13 @@ jobs:
       - name: Deploy to Firebase Hosting and Firestore rules
         # google-github-actions/auth が書き出す ADC（GOOGLE_APPLICATION_CREDENTIALS）
         # を firebase-tools がそのまま利用する。
+        #
+        # CLI は package.json / lockfile で固定したものを使う（--no-install で
+        # 取りに行かせない）。デプロイ用サービスアカウントの認証が済んだ後に
+        # npm の latest タグを引くと、その時点の中身を検証なしに実行することに
+        # なるため。tests.yml・preview*.yml も同じ CLI を使う。
         run: |
-          npx firebase-tools@latest deploy \
+          npx --no-install firebase deploy \
             --only hosting,firestore:rules \
             --project "$PROJECT_ID" \
             --non-interactive
