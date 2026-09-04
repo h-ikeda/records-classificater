@@ -160,7 +160,7 @@ test('ウィンドウが上限まで埋まっていれば、続きがあると�
   const fake = createFakeGateway();
   const store = createTripStore(fake.gateway, { pageSize: 2 });
   store.watch('v1');
-  // pageSize + 1 件。余分の 1 件は走行距離の土台
+  // pageSize + 1 件。余分の 1 件で「その先がある」と分かる
   fake.emit('v1', [trip('c', 3, 130), trip('b', 2, 120), trip('a', 1, 110)]);
   expect(store.getState().trips.v1.hasMore).toBe(true);
 });
@@ -174,8 +174,8 @@ test('キャッシュ由来のウィンドウでも続きの有無は分かる�
   // 張られた購読はサーバーと同期する前にキャッシュ由来のウィンドウを届ける
   fake.emit('v1', window, { synced: false });
   expect(store.getState().trips.v1).toMatchObject({ loaded: false, hasMore: true });
-  // 中身は同じなので、続きの有無も件数も変わらない。画面が「続きを読む合図」を
-  // 張り直す手掛かりにできるのは、読み込み完了だけだということ
+  // 中身は同じなので、続きの有無も件数も変わらない。あとから変わるのは
+  // 読み込み完了だけで、記録そのものは先に届いている（画面はこれを待たずに出す）
   fake.emit('v1', window, { synced: true });
   expect(store.getState().trips.v1).toMatchObject({ loaded: true, hasMore: true });
   expect(store.getState().trips.v1.trips).toHaveLength(3);

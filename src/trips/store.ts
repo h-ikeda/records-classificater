@@ -37,12 +37,7 @@ export const MAX_WATCHED_VEHICLES = 5;
 export type LoadFailure = '' | 'failed' | 'stalled';
 
 export interface TripsState {
-  /**
-   * 読み込み済みの記録（新しい順）。
-   *
-   * hasMore のときは末尾の 1 件が「表示する最古の記録の 1 つ前」で、走行距離の
-   * 差分を出すためだけに持っている。表示するのは visibleTrips のほう。
-   */
+  /** 読み込み済みの記録（新しい順）。手元にあるぶんはすべて表示してよい */
   trips: TripIdentified[],
   /** サーバーと同期できたスナップショットを一度でも受け取ったか */
   loaded: boolean,
@@ -253,8 +248,8 @@ export function createTripStore(gateway: TripGateway, {
     };
     entries.set(vehicleId, entry);
     state = { ...state, trips: { ...state.trips, [vehicleId]: EMPTY_TRIPS_STATE } };
-    // 表示するのは pageSize 件だが、いちばん古い 1 件は走行距離の差分を出すための
-    // 土台として余分に読む。これが無いと、先頭の記録だけ距離が出せない
+    // pageSize より 1 件だけ多く読む。ちょうど pageSize 件で終わりなのか、その先が
+    // あるのかを、余分の 1 件が届いたかどうかで見分けるため（下の windowFull）
     entry.unsubscribe = gateway.subscribeLatest(vehicleId, pageSize + 1, {
       onWindow: (window) => {
         if (!entries.has(vehicleId)) return;
