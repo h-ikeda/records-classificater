@@ -121,8 +121,39 @@ jobs:
         # 0 件なら何もせず完了する）。一方、権限不足はコレクションの列挙に
         # 失敗して非ゼロになる。つまり非ゼロは常に本物の失敗であり、そのまま
         # ジョブを落としてよい。
+        #
+        # ただし firestore:delete は失敗の中身を握り潰す。削除対象の取得に
+        # 失敗したときの出力は
+        #   Error: Deletion failed. Errors: Failed to fetch documents to delete >= 3 times..
+        # だけで、API が返した理由（権限不足なのか、割り当て超過なのか）が
+        # どこにも残らない。実際にこれだけを頼りに原因を探す羽目になったので、
+        # 失敗したら --debug で一度だけやり直し、API とのやり取りを記録する。
+        #
+        # --debug が出すのはリクエストの URL・本文と応答で、Authorization
+        # ヘッダは含まれない（firebase-tools の apiv2 は (partial)header として
+        # 送信元の情報だけを出す）。それでも公開リポジトリのログに残るため、
+        # 万一に備えて Bearer トークンらしき文字列は伏せる。
+        #
+        # やり直しで消えた場合はジョブを成功させる。後片付けは終わっており、
+        # そこで落とすと「消えているのに失敗している」を作るため。一時的な
+        # 失敗だったことは warning に残す。
         run: |
-          npx --no-install firebase firestore:delete "preview-channels/pr-$PR" \
-            --recursive \
-            --force \
-            --project "$PROJECT_ID"
+          set -o pipefail
+          delete() {
+            npx --no-install firebase firestore:delete "preview-channels/pr-$PR" \
+              --recursive \
+              --force \
+              --project "$PROJECT_ID" "$@"
+          }
+          if delete; then
+            exit 0
+          fi
+          echo "::group::--debug で再実行して、API が返した理由を出す"
+          if delete --debug 2>&1 | sed -E 's#Bearer [A-Za-z0-9._~+/-]+#Bearer [REDACTED]#g'; then
+            echo "::endgroup::"
+            echo "::warning::1 回目は失敗しましたが、やり直しで preview-channels/pr-$PR を削除できました"
+            exit 0
+          fi
+          echo "::endgroup::"
+          echo "::error::preview-channels/pr-$PR を削除できませんでした（理由は上の --debug の出力にあります）"
+          exit 1
