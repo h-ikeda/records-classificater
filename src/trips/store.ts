@@ -83,12 +83,10 @@ export const EMPTY_YEAR_STATE: YearSummaryState = {
   total: 0,
 };
 
-/** 購読しているウィンドウの中身と、そこから消えた記録。 */
+/** 購読しているウィンドウの現在の中身。 */
 export interface LatestWindow {
-  /** ウィンドウの現在の中身（新しい順） */
+  /** ウィンドウの現在の中身（新しい順）。差分ではなく、毎回そのときの全部 */
   trips: TripIdentified[],
-  /** このスナップショットでウィンドウから消えた記録の ID */
-  removedIds: string[],
   /** サーバーと同期できた内容か。キャッシュ由来なら false */
   synced: boolean,
 }
@@ -119,23 +117,28 @@ export interface TripGateway {
 }
 
 /**
- * 購読中のウィンドウの中身を、読み込み済みの一覧へ取り込む。
+ * 読み込み済みの記録へ取り込み、新しい順の一覧を作り直す。
  *
- * ウィンドウには limit が付いているので、新しい記録が増えると古い記録が
- * 押し出され、removed として届く。押し出されただけの記録まで捨てると
- * 一覧に穴が開くため、ウィンドウの下端より古いものは残す。
+ * 鍵はドキュメント ID そのもの。同じ記録が二度届いても（購読の張り直し、
+ * ウィンドウの出入り、読み足しの境界の重なり）上書きになるだけなので、
+ * 重複も取りこぼしも起きない。
+ *
+ * 一度読み込んだ記録は捨てない。走行記録は追加しかできない（ルールが
+ * `vehicles/{vid}/trips/{tid}` に許すのは get / list / create だけ）ので、
+ * 購読しているウィンドウから記録が消えるのは「新しい記録に押し出された」
+ * ときだけであり、削除ではないため。押し出されただけの記録を捨てると、
+ * 読み足した範囲との間に穴が開く。
+ *
+ * ウィンドウの出入りと削除は listener からは同じ removed として届き、
+ * 見分けられない。だから見分けようとせず、ID で持ち続けることにしている。
+ * 前提はルールの試験（`nobody can delete a trip` ほか）で固定してあるので、
+ * 削除を許すようになればそちらが落ちてここへ戻ってくる。
+ *
+ * loaded は書き換える（呼び出し側が持っている読み込み済みの索引そのもの）。
  */
-export function mergeWindow(loaded: TripIdentified[], window: LatestWindow): TripIdentified[] {
-  const map = new Map(loaded.map((trip) => [trip.id, trip]));
-  window.trips.forEach((trip) => map.set(trip.id, trip));
-  const oldest = window.trips[window.trips.length - 1];
-  window.removedIds.forEach((id) => {
-    const removed = map.get(id);
-    if (!removed) return;
-    if (oldest && compareTimestamp(removed.timestamp, oldest.timestamp) < 0) return;
-    map.delete(id);
-  });
-  return sortNewestFirst([...map.values()]);
+export function absorbTrips(loaded: Map<string, TripIdentified>, incoming: TripIdentified[]): TripIdentified[] {
+  incoming.forEach((trip) => loaded.set(trip.id, trip));
+  return sortNewestFirst(Array.from(loaded.values()));
 }
 
 /** 年ごとの集計を覚えておくときの鍵。車両 ID に改行は入らないので区切りに使う。 */
@@ -151,6 +154,13 @@ interface Entry {
   windowFull: boolean,
   /** 読み足した先にまだ記録があるか。null なら、まだ一度も読み足していない */
   moreBeyondPaged: boolean | null,
+  /**
+   * 読み込み済みの記録を、ドキュメント ID で引ける形で持つ。
+   *
+   * 画面へ渡すのは新しい順の配列だが、届いた記録の取り込みはこちらで行う。
+   * 配列から毎回索引を作り直さずに済み、同じ記録かどうかを ID だけで決められる。
+   */
+  byId: Map<string, TripIdentified>,
 }
 
 export interface TripStore {
@@ -239,6 +249,7 @@ export function createTripStore(gateway: TripGateway, {
       usedAt: clock,
       windowFull: false,
       moreBeyondPaged: null,
+      byId: new Map(),
     };
     entries.set(vehicleId, entry);
     state = { ...state, trips: { ...state.trips, [vehicleId]: EMPTY_TRIPS_STATE } };
@@ -252,7 +263,7 @@ export function createTripStore(gateway: TripGateway, {
         // ただし読み足したあとは、下端の判断は読み足しの結果のほうが正しい
         entry.windowFull = window.trips.length > pageSize;
         patchTrips(vehicleId, {
-          trips: mergeWindow(current.trips, window),
+          trips: absorbTrips(entry.byId, window.trips),
           // 空のキャッシュから届く空のスナップショットを完了と見なすと、1 件も
           // 読めていないのに「記録がありません」と表示してしまう
           loaded: current.loaded || window.synced,
@@ -290,14 +301,12 @@ export function createTripStore(gateway: TripGateway, {
     patchTrips(vehicleId, { loadingMore: true });
     gateway.fetchOlder(vehicleId, oldest.timestamp, pageSize).then((older) => {
       if (!entries.has(vehicleId)) return;
-      const latest = state.trips[vehicleId] || EMPTY_TRIPS_STATE;
-      const known = new Set(latest.trips.map(({ id }) => id));
-      const added = older.filter(({ id }) => !known.has(id));
+      const added = older.filter(({ id }) => !entry.byId.has(id));
       // 同じ時刻の記録を取りこぼさないよう境界を含めて取っているので、
       // 1 件も増えなければ本当に終端。ここで止めないと同じ範囲を読み続ける
       entry.moreBeyondPaged = added.length > 0 && older.length >= pageSize;
       patchTrips(vehicleId, {
-        trips: sortNewestFirst([...latest.trips, ...added]),
+        trips: absorbTrips(entry.byId, added),
         loadingMore: false,
         hasMore: hasMore(entry),
       });

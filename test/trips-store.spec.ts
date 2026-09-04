@@ -1,8 +1,8 @@
 import type { Timestamp } from 'firebase/firestore';
 import type { TripIdentified } from '../src/trips/aggregate';
 import {
+  absorbTrips,
   createTripStore,
-  mergeWindow,
   yearKey,
   type LatestHandlers,
   type TripGateway,
@@ -56,8 +56,8 @@ function createFakeGateway() {
     gateway,
     calls,
     unsubscribed,
-    emit(vehicleId: string, trips: TripIdentified[], { removedIds = [] as string[], synced = true } = {}) {
-      windows.get(vehicleId)!.onWindow({ trips, removedIds, synced });
+    emit(vehicleId: string, trips: TripIdentified[], { synced = true } = {}) {
+      windows.get(vehicleId)!.onWindow({ trips, synced });
     },
     handlers: (vehicleId: string) => windows.get(vehicleId)!,
     setOlder(trips: TripIdentified[]) { older = trips; },
@@ -69,23 +69,30 @@ function createFakeGateway() {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test('押し出された記録は残し、本当に消えた記録だけ捨てる', () => {
-  const loaded = [trip('c', 3, 130), trip('b', 2, 120), trip('a', 1, 110)];
-  // 新しい記録が増えて、いちばん古い a がウィンドウから押し出された
-  const pushedOut = mergeWindow(loaded, {
-    trips: [trip('d', 4, 140), trip('c', 3, 130), trip('b', 2, 120)],
-    removedIds: ['a'],
-    synced: true,
-  });
-  expect(ids(pushedOut)).toEqual(['d', 'c', 'b', 'a']);
+test('取り込みの鍵はドキュメント ID。二度届いても重複しない', () => {
+  const loaded = new Map<string, TripIdentified>();
+  absorbTrips(loaded, [trip('b', 2, 120), trip('a', 1, 110)]);
+  // 購読を張り直すと全件がもう一度届く。上書きになるだけで増えない
+  const again = absorbTrips(loaded, [trip('b', 2, 120), trip('a', 1, 110)]);
+  expect(ids(again)).toEqual(['b', 'a']);
+});
 
-  // ウィンドウの範囲内にいるのに消えたなら、本当に消えた記録
-  const deleted = mergeWindow(loaded, {
-    trips: [trip('c', 3, 130), trip('a', 1, 110)],
-    removedIds: ['b'],
-    synced: true,
-  });
-  expect(ids(deleted)).toEqual(['c', 'a']);
+test('ウィンドウから押し出された記録も、読み込み済みとして残る', () => {
+  const loaded = new Map<string, TripIdentified>();
+  absorbTrips(loaded, [trip('c', 3, 130), trip('b', 2, 120), trip('a', 1, 110)]);
+  // 新しい記録が増えて a がウィンドウの外へ出た。ウィンドウには載らなくなるが、
+  // 捨てると読み足した範囲との間に穴が開く（走行記録は追加しかできないので、
+  // ウィンドウから消えたことは削除を意味しない）
+  const next = absorbTrips(loaded, [trip('e', 5, 150), trip('d', 4, 140), trip('c', 3, 130)]);
+  expect(ids(next)).toEqual(['e', 'd', 'c', 'b', 'a']);
+});
+
+test('同じ ID で届いた記録は差し替わる', () => {
+  const loaded = new Map<string, TripIdentified>();
+  absorbTrips(loaded, [trip('a', 1, 110, '業務')]);
+  const next = absorbTrips(loaded, [trip('a', 1, 115, '私用')]);
+  expect(next).toHaveLength(1);
+  expect(next[0]).toMatchObject({ id: 'a', odo: 115, class: '私用' });
 });
 
 test('同じ車両を何度選んでも購読は 1 回だけ', () => {
@@ -122,6 +129,21 @@ test('購読の数が上限を超えたら、いちばん長く使っていな�
   store.watch('v3');
   expect(fake.unsubscribed).toEqual(['v2']);
   expect(Object.keys(store.getState().trips).sort()).toEqual(['v1', 'v3']);
+});
+
+test('読み足したあとに新しい記録が増えても、一覧に穴が開かない', async () => {
+  const fake = createFakeGateway();
+  const store = createTripStore(fake.gateway, { pageSize: 2 });
+  store.watch('v1');
+  fake.emit('v1', [trip('e', 5, 150), trip('d', 4, 140), trip('c', 3, 130)]);
+  fake.setOlder([trip('c', 3, 130), trip('b', 2, 120)]);
+  store.loadMore('v1');
+  await flush();
+
+  // 新しい記録が 2 件増え、d と c がウィンドウ（3 件）から押し出された。
+  // c は読み足しでも持っているが、d はウィンドウにしか無い
+  fake.emit('v1', [trip('g', 7, 170), trip('f', 6, 160), trip('e', 5, 150)]);
+  expect(ids(store.getState().trips.v1.trips)).toEqual(['g', 'f', 'e', 'd', 'c', 'b']);
 });
 
 test('キャッシュ由来のスナップショットだけでは読み込み完了にしない', () => {

@@ -43,13 +43,10 @@ export function createFirestoreTripGateway(db: Firestore): TripGateway {
           // 読み込み完了と見なしてよいのは、サーバーと同期できたときだけ
           const synced = !snapshot.metadata.fromCache;
           if (synced) notify();
-          onWindow({
-            trips: snapshot.docs.map(toTrip),
-            removedIds: snapshot.docChanges()
-              .filter(({ type }) => type === 'removed')
-              .map(({ doc }) => doc.id),
-            synced,
-          });
+          // 差分（docChanges）ではなく、そのときのウィンドウの全部を渡す。
+          // 取り込む側はドキュメント ID を鍵にして上書きするので、張り直しで
+          // 全件が届いても重複しない
+          onWindow({ trips: snapshot.docs.map(toTrip), synced });
         },
         () => {
           notify();
