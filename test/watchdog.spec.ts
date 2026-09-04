@@ -107,12 +107,48 @@ test('張り直しの上限に達したら onStalled を呼び、それ以上は
 
   // 最初の 1 回 + 張り直し 2 回
   expect(stub.attempts).toBe(3);
-  expect(stub.unsubscribed).toBe(3);
+  // 諦めたあとも最後の購読は残す。捨てると、通信が戻っても二度と届かない
+  expect(stub.unsubscribed).toBe(2);
   expect(onStalled).toHaveBeenCalledTimes(1);
 
   jest.advanceTimersByTime(10000);
   expect(stub.attempts).toBe(3);
   expect(onStalled).toHaveBeenCalledTimes(1);
+});
+
+test('諦めたあとに届いたら onRecovered を呼ぶ', () => {
+  const stub = createStubSubscribe();
+  const onStalled = jest.fn();
+  const onRecovered = jest.fn();
+  subscribeWithWatchdog(stub.subscribe, {
+    timeoutMs: 1000, maxRetries: 1, onStalled, onRecovered,
+  });
+
+  jest.advanceTimersByTime(1000);
+  jest.advanceTimersByTime(2000);
+  expect(onStalled).toHaveBeenCalledTimes(1);
+  expect(onRecovered).not.toHaveBeenCalled();
+
+  // 残してある最後の購読へ、遅れて届く
+  stub.deliver();
+  expect(onRecovered).toHaveBeenCalledTimes(1);
+  // 諦めたことも、そのあと届いたことも記録に残る
+  expect(warn.mock.calls[warn.mock.calls.length - 1][0]).toContain('諦めたあとに初回スナップショットが届いた');
+
+  stub.deliver();
+  expect(onRecovered).toHaveBeenCalledTimes(1);
+});
+
+test('諦めたあとに解除すれば、残していた購読も解除される', () => {
+  const stub = createStubSubscribe();
+  const unsubscribe = subscribeWithWatchdog(stub.subscribe, { timeoutMs: 1000, maxRetries: 1 });
+
+  jest.advanceTimersByTime(1000);
+  jest.advanceTimersByTime(2000);
+  expect(stub.unsubscribed).toBe(1);
+
+  unsubscribe();
+  expect(stub.unsubscribed).toBe(2);
 });
 
 test('解除したら購読も見張りも止まる', () => {
