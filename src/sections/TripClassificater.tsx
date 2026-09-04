@@ -8,7 +8,7 @@ import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
 import { Vehicle, vehicleConverter } from '../firestore/definitions/Vehicle';
-import { calculateTrips, compareTimestamp, type TripIdentified } from '../trips/aggregate';
+import { calculateTrips, compareTimestamp } from '../trips/aggregate';
 import { EMPTY_TRIPS_STATE, EMPTY_YEAR_STATE, yearKey } from '../trips/store';
 import { useTripStore } from '../trips/useTripStore';
 import Loader from '../components/Loader';
@@ -72,8 +72,9 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 移行処理の実行中フラグ。移行中に届くスナップショットは自分のローカル書き込みの
   // 反映であり、参照先の車両がまだサーバーに無いため状態へ反映してはいけない
   const migrating = useRef(false);
-  // 一覧の末尾。ここが見えたら続きを読み足す
-  const loadMoreAnchor = useRef<HTMLLIElement>(null);
+  // 一覧の末尾。ここが見えたら続きを読み足す。ref ではなく state で持ち、
+  // 見張りを張る effect が「目印そのもの」を依存にできるようにする
+  const [loadMoreAnchor, setLoadMoreAnchor] = useState<HTMLLIElement | null>(null);
 
   const { store, state } = useTripStore(`${currentUser.uid}:${reloadKey}`);
   const tripsState = (currentVehicleId && state.trips[currentVehicleId]) || EMPTY_TRIPS_STATE;
@@ -193,31 +194,31 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     store.loadYear(currentVehicleId, currentYear);
   }, [store, summaryOpen, currentVehicleId, currentYear, yearState]);
 
-  // 一覧の末尾が見えたら続きを読み足す
+  // 一覧の末尾が見えたら続きを読み足す。
+  //
+  // 依存は目印そのもの。「続きがある」という状態ではなく、見張る対象が現れた
+  // ／消えたことで張り直るので、目印がいつ描かれるかを気にしなくて済む。
+  //
+  // 件数も依存に入れる。読み足したあとも目印が見えたままなら、張り直して初回の
+  // 判定をやり直さないと、続きを読む合図が二度と来ない。
   useEffect(() => {
-    const anchor = loadMoreAnchor.current;
-    if (!anchor || !currentVehicleId || !tripsState.hasMore) return;
+    if (!loadMoreAnchor || !currentVehicleId) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some(({ isIntersecting }) => isIntersecting)) store.loadMore(currentVehicleId);
     });
-    observer.observe(anchor);
+    observer.observe(loadMoreAnchor);
     return () => observer.disconnect();
-  }, [store, currentVehicleId, tripsState.hasMore, tripsState.trips.length]);
+  }, [store, currentVehicleId, loadMoreAnchor, tripsState.trips.length]);
 
   // 分類は車両一覧の購読から取り出す（車両ドキュメントを別に読まない）
   const vehicleClasses = useMemo(() => {
     return vehicles.find(({ id }) => id === currentVehicleId)?.classes || [];
   }, [vehicles, currentVehicleId]);
 
-  // 続きがあるときは、いちばん古い 1 件は「その次の記録の走行距離を出すための
-  // 土台」として読んでいるだけなので表示しない
-  const [visibleTrips, baseTrip] = useMemo<[TripIdentified[], TripIdentified | null]>(() => {
-    if (!tripsState.hasMore) return [tripsState.trips, null];
-    return [tripsState.trips.slice(0, -1), tripsState.trips[tripsState.trips.length - 1] || null];
-  }, [tripsState.trips, tripsState.hasMore]);
-
-  // 一覧は新しい順に表示する（trip の差分計算は古い順のまま）
-  const displayTrips = useMemo(() => calculateTrips(visibleTrips, baseTrip).reverse(), [visibleTrips, baseTrip]);
+  // 一覧は新しい順に表示する（trip の差分計算は古い順のまま）。読み込み済みは
+  // 隠さず全部出す。いちばん古い 1 件だけは直前の記録が手元に無いので走行距離を
+  // 出せず、ODO だけの行になる（読み足せばその行にも距離が入る）
+  const displayTrips = useMemo(() => calculateTrips(tripsState.trips).reverse(), [tripsState.trips]);
 
   // ODO は単調増加なので、読み込み済みの最大値が最新値
   const lastODO = useMemo(() => tripsState.trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [tripsState.trips]);
@@ -438,13 +439,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             </div>
           </li>
         ))}
-        {tripsLoading ? (
-          <li className="py-10">
-            <Loader className="text-lime-500 text-3xl" />
-          </li>
-        ) : tripsState.hasMore ? (
-          // 見えたら読み足す。自動で読めない環境のために押せるようにもしておく
-          <li ref={loadMoreAnchor} className="py-6 text-center">
+        {/* 続きがあるなら、読み込みの途中かどうかに関わらず末尾に目印を出す。
+            見えたら読み足す。自動で読めない環境のために押せるようにもしておく */}
+        {tripsState.hasMore && (
+          <li ref={setLoadMoreAnchor} className="py-6 text-center">
             {tripsState.loadingMore ? (
               <Loader className="text-lime-500 text-2xl" />
             ) : (
@@ -457,13 +455,20 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
               </button>
             )}
           </li>
-        ) : !displayTrips.length && !errorMessage ? (
+        )}
+        {/* ローダーと「記録がありません」は、出せる記録が 1 件も無いときだけ。
+            キャッシュ由来でも手元にあるぶんは先に見せる */}
+        {!displayTrips.length && (tripsLoading ? (
+          <li className="py-10">
+            <Loader className="text-lime-500 text-3xl" />
+          </li>
+        ) : !errorMessage ? (
           <li className="text-center text-gray-400 py-10">
             {currentVehicleId ? (
               <>まだ記録がありません。<br />下のボタンから追加できます。</>
             ) : '車両が選択されていません。'}
           </li>
-        ) : null}
+        ) : null)}
       </ul>
 
       {/* 記録追加（主要操作なので画面下端に固定バーで常時表示） */}
