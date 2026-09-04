@@ -10,8 +10,11 @@ import type { Unsubscribe } from 'firebase/firestore';
 // 自動でそれを行う。利用者にリロードさせない（＝リロードと同じことを、画面を
 // 保ったまま代わりにやる）ための見張り役。
 
+// 実環境で「走行記録の購読だけが 8 秒待ってもひとつもスナップショットを
+// 返さず、張り直したら即座に届いた」ことを確認済み（PR #458 のプレビュー）。
+// 無反応なら早く見切ってよいので、最初の待ちは短くする。
 /** 初回スナップショットを待つ時間。過ぎたら購読を張り直す。 */
-export const FIRST_SNAPSHOT_TIMEOUT_MS = 8000;
+export const FIRST_SNAPSHOT_TIMEOUT_MS = 5000;
 
 /** 自動で張り直す回数。使い切ったら onStalled で利用者に知らせる。 */
 export const MAX_AUTO_RETRIES = 2;
@@ -26,7 +29,13 @@ export interface WatchdogOptions {
    * 起きていたことを後から確かめられるようにする。
    */
   label?: string,
-  /** 初回スナップショットを待つ時間（ミリ秒） */
+  /**
+   * 初回スナップショットを待つ時間（ミリ秒）。
+   *
+   * 張り直すたびに倍にする。無反応なら 1 回目で見切りたいので短くしたいが、
+   * 単に回線が遅くて時間がかかっているだけの場合、短い待ちで何度も張り直すと
+   * いつまでも届かない。回を追うごとに待ちを伸ばして両方に対応する。
+   */
   timeoutMs?: number,
   /** 自動で張り直す回数 */
   maxRetries?: number,
@@ -64,6 +73,7 @@ export function subscribeWithWatchdog(
   let retries = 0;
   let arrived = false;
   let cancelled = false;
+  let startedAt = 0;
 
   function clearTimer() {
     if (timer === null) return;
@@ -72,11 +82,20 @@ export function subscribeWithWatchdog(
   }
 
   function notify() {
+    // 張り直した先で届いたなら、何秒かかったかを残す。前の購読が時間内に
+    // 何も返さなかったのに次がすぐ返ったなら、回線の遅さではなくその購読が
+    // 無反応だったということ。原因を追うための手掛かりになる
+    if (!arrived && retries > 0) {
+      console.warn(`${label}: ${retries} 回目の購読で初回スナップショットが届いた（張り直してから ${Date.now() - startedAt}ms）`);
+    }
     arrived = true;
     clearTimer();
   }
 
   function start() {
+    // 張り直すたびに待ちを倍にする
+    const wait = timeoutMs * (2 ** retries);
+    startedAt = Date.now();
     unsubscribe = subscribe(notify);
     // subscribe の中で同期的に notify されたなら、見張る必要はない
     if (arrived || cancelled) return;
@@ -91,11 +110,11 @@ export function subscribeWithWatchdog(
         onStalled?.();
         return;
       }
+      console.warn(`${label}: 初回スナップショットが ${wait}ms 届かないため購読を張り直す（${retries + 1}/${maxRetries} 回目）`);
       retries += 1;
-      console.warn(`${label}: 初回スナップショットが ${timeoutMs}ms 届かないため購読を張り直す（${retries}/${maxRetries} 回目）`);
       onRetry?.(retries);
       start();
-    }, timeoutMs);
+    }, wait);
   }
 
   start();

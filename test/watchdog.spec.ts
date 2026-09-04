@@ -72,14 +72,38 @@ test('張り直した先で届けば、そこで見張りは終わる', () => {
   expect(onStalled).not.toHaveBeenCalled();
 });
 
+test('張り直すたびに待ち時間を倍にする', () => {
+  const stub = createStubSubscribe();
+  subscribeWithWatchdog(stub.subscribe, { timeoutMs: 1000, maxRetries: 3 });
+
+  // 1 回目は 1000ms 待つ
+  jest.advanceTimersByTime(999);
+  expect(stub.attempts).toBe(1);
+  jest.advanceTimersByTime(1);
+  expect(stub.attempts).toBe(2);
+
+  // 2 回目は 2000ms。回線が遅いだけの場合に、短い待ちで張り直し続けない
+  jest.advanceTimersByTime(1999);
+  expect(stub.attempts).toBe(2);
+  jest.advanceTimersByTime(1);
+  expect(stub.attempts).toBe(3);
+
+  // 3 回目は 4000ms
+  jest.advanceTimersByTime(3999);
+  expect(stub.attempts).toBe(3);
+  jest.advanceTimersByTime(1);
+  expect(stub.attempts).toBe(4);
+});
+
 test('張り直しの上限に達したら onStalled を呼び、それ以上は張り直さない', () => {
   const stub = createStubSubscribe();
   const onStalled = jest.fn();
   subscribeWithWatchdog(stub.subscribe, { timeoutMs: 1000, maxRetries: 2, onStalled });
 
+  // 待ちは倍々に伸びる（1000 → 2000 → 4000）
   jest.advanceTimersByTime(1000);
-  jest.advanceTimersByTime(1000);
-  jest.advanceTimersByTime(1000);
+  jest.advanceTimersByTime(2000);
+  jest.advanceTimersByTime(4000);
 
   // 最初の 1 回 + 張り直し 2 回
   expect(stub.attempts).toBe(3);
@@ -138,10 +162,23 @@ test('張り直したことをコンソールへ残す', () => {
   expect(warn).toHaveBeenCalledTimes(1);
   expect(warn.mock.calls[0][0]).toContain('走行記録');
 
-  // 諦めたことも残す
-  jest.advanceTimersByTime(1000);
+  // 諦めたことも残す（2 回目の待ちは 2000ms）
+  jest.advanceTimersByTime(2000);
   expect(warn).toHaveBeenCalledTimes(2);
   expect(warn.mock.calls[1][0]).toContain('走行記録');
+});
+
+test('張り直した先で届いたときは、そのことも残す', () => {
+  const stub = createStubSubscribe();
+  subscribeWithWatchdog(stub.subscribe, { label: '走行記録', timeoutMs: 1000, maxRetries: 2 });
+
+  jest.advanceTimersByTime(1000);
+  warn.mockClear();
+  stub.deliver();
+
+  // 前の購読が 1000ms 無反応だったのに次はすぐ届いた、という記録が残る
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(warn.mock.calls[0][0]).toContain('1 回目の購読で初回スナップショットが届いた');
 });
 
 test('届いたときは何も残さない', () => {
