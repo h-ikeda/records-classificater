@@ -8,15 +8,10 @@ import { tripConverter, type Trip } from '../firestore/definitions/Trip';
 import { userConverter } from '../firestore/definitions/User';
 import { tripsConverter } from '../firestore/definitions/Trips';
 import { Vehicle, vehicleConverter } from '../firestore/definitions/Vehicle';
+import { calculateTrips, compareTimestamp, type TripIdentified } from '../trips/aggregate';
+import { EMPTY_TRIPS_STATE, EMPTY_YEAR_STATE, yearKey } from '../trips/store';
+import { useTripStore } from '../trips/useTripStore';
 import Loader from '../components/Loader';
-
-interface TripIdentified extends Trip {
-  id: string,
-}
-
-interface TripCalculated extends TripIdentified {
-  trip: number,
-}
 
 interface VehicleIdentified extends Vehicle {
   id: string,
@@ -37,13 +32,13 @@ const classPalette = [
 const STALLED_MESSAGE = {
   user: 'データを読み込めませんでした。通信状況を確認して再試行してください',
   vehicles: '車両一覧を読み込めませんでした。通信状況を確認して再試行してください',
-  vehicle: '車両情報を読み込めませんでした。通信状況を確認して再試行してください',
-  trips: '走行記録を読み込めませんでした。通信状況を確認して再試行してください',
 };
 
-function sortByTimestamp({ timestamp: t1 }: Trip, { timestamp: t2 }: Trip) {
-  return (t1 as unknown as number) - (t2 as unknown as number);
-}
+// 走行記録の読み込みで出す文言。ストアは失敗の種類だけを持ち、文言は画面で決める
+const TRIPS_MESSAGE = {
+  failed: '走行記録の読み込みに失敗しました',
+  stalled: '走行記録を読み込めませんでした。通信状況を確認して再試行してください',
+};
 
 function formatDate(timestamp: Timestamp) {
   const d = timestamp.toDate();
@@ -58,15 +53,14 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
   const db = getFirestore();
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
-  const [vehicleClasses, setVehicleClasses] = useState<string[]>([]);
   const [currentYear, setCurrentYear] = useState(() => (new Date()).getFullYear());
+  // 年間集計は畳んである間は 1 件も読まない。開かれたときだけ取りに行く
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [vehicles, setVehicles] = useState<VehicleIdentified[]>([]);
-  const [trips, setTrips] = useState<TripIdentified[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   // 取得前の空データを「記録なし」と誤表示しないよう、読み込み完了を明示的に管理する
   const [userLoaded, setUserLoaded] = useState(false);
   const [vehiclesLoaded, setVehiclesLoaded] = useState(false);
-  const [tripsLoaded, setTripsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   // 再試行のたびに増やす。購読を張り直すためだけの値
   const [reloadKey, setReloadKey] = useState(0);
@@ -78,6 +72,12 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 移行処理の実行中フラグ。移行中に届くスナップショットは自分のローカル書き込みの
   // 反映であり、参照先の車両がまだサーバーに無いため状態へ反映してはいけない
   const migrating = useRef(false);
+  // 一覧の末尾。ここが見えたら続きを読み足す
+  const loadMoreAnchor = useRef<HTMLLIElement>(null);
+
+  const { store, state } = useTripStore(`${currentUser.uid}:${reloadKey}`);
+  const tripsState = (currentVehicleId && state.trips[currentVehicleId]) || EMPTY_TRIPS_STATE;
+  const yearState = (currentVehicleId && state.years[yearKey(currentVehicleId, currentYear)]) || EMPTY_YEAR_STATE;
 
   useEffect(() => {
     setVehicles([]);
@@ -131,6 +131,9 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
       // 諦めたあとに遅れて届いたら、出したままの表示を取り下げる
       onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.user ? '' : prev)),
     });
+    // この購読は選択中の車両も含む（読める車両しか選べないため）。分類の一覧は
+    // ここから取り出す。車両ドキュメントを別に購読すると、同じものをもう一度
+    // 読むことになるので張らない
     const unsubVehicles = subscribeWithWatchdog((notify) => {
       // 張り直すと全件が added として届く。前回分は捨ててから購読する
       setVehicles([]);
@@ -177,108 +180,55 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     };
   }, [currentUser, reloadKey]);
 
+  // 車両が決まったら購読を確保する。切り替えても解除しないので、戻ってきたときは
+  // 取得済みのスナップショットがそのまま使われ、読み取りは増えない
   useEffect(() => {
-    // 車両切り替え時は前の車両の記録を残さず、読み込み中として扱う
-    setTrips([]);
-    setVehicleClasses([]);
-    setTripsLoaded(false);
     if (!currentVehicleId) return;
-    const unsubVehicle = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), { includeMetadataChanges: true }, (snapshot) => {
-      // キャッシュ由来の空スナップショットで分類を消すと、色分けと入力フォームの
-      // 選択肢が黙って壊れる。サーバーと同期できた内容だけを反映する
-      if (snapshot.metadata.fromCache) return;
-      notify();
-      setVehicleClasses(snapshot.data()?.classes || []);
-    }, () => {
-      notify();
-      setVehicleClasses([]);
-    }), {
-      label: '車両情報',
-      // 分類が読めないと色分けと入力フォームの選択肢が壊れる。黙って諦めない
-      onStalled: () => setLoadError(STALLED_MESSAGE.vehicle),
-      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.vehicle ? '' : prev)),
+    store.watch(currentVehicleId);
+  }, [store, currentVehicleId]);
+
+  // 年間集計は開いているときだけ読む。読み込み済みなら loadYear は何もしない
+  useEffect(() => {
+    if (!summaryOpen || !currentVehicleId) return;
+    store.loadYear(currentVehicleId, currentYear);
+  }, [store, summaryOpen, currentVehicleId, currentYear, yearState]);
+
+  // 一覧の末尾が見えたら続きを読み足す
+  useEffect(() => {
+    const anchor = loadMoreAnchor.current;
+    if (!anchor || !currentVehicleId || !tripsState.hasMore) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(({ isIntersecting }) => isIntersecting)) store.loadMore(currentVehicleId);
     });
-    const unsubTrips = subscribeWithWatchdog((notify) => {
-      // 張り直すと全件が added として届く。前回分は捨ててから購読する
-      setTrips([]);
-      return onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), { includeMetadataChanges: true }, (snapshot) => {
-        // 空のキャッシュから届く空のスナップショットを完了と見なすと、1 件も
-        // 読めていないのに「記録がありません」と表示してしまう。完了はサーバーと
-        // 同期できたときだけ。反映自体は毎回行い、自分の書き込みは即座に映す
-        if (!snapshot.metadata.fromCache) {
-          notify();
-          // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
-          setTripsLoaded(true);
-        }
-        snapshot.docChanges().forEach(({ type, doc }) => {
-          setTrips((prev) => {
-            if (type === 'added') {
-              return [...prev, { ...doc.data(), id: doc.id }];
-            }
-            const i = prev.findIndex(({ id }) => id === doc.id);
-            if (i < 0) return prev;
-            if (type === 'modified') {
-              const next = [...prev];
-              next[i] = { ...doc.data(), id: doc.id };
-              return next;
-            }
-            return prev.filter((_, idx) => idx !== i);
-          });
-        });
-      }, () => {
-        notify();
-        setLoadError('走行記録の読み込みに失敗しました');
-        setTripsLoaded(true);
-      });
-    }, {
-      label: '走行記録',
-      onStalled: () => {
-        setLoadError(STALLED_MESSAGE.trips);
-        setTripsLoaded(true);
-      },
-      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.trips ? '' : prev)),
-    });
-    return () => {
-      unsubVehicle();
-      unsubTrips();
-    };
-  }, [currentVehicleId, reloadKey]);
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [store, currentVehicleId, tripsState.hasMore, tripsState.trips.length]);
 
-  const calculatedTrips = useMemo<TripCalculated[]>(() => {
-    const [first, ...remains] = [...trips].sort(sortByTimestamp);
-    if (!first) return [];
-    return remains.reduce(([acc, odo]: [TripCalculated[], number], trip: TripIdentified): [TripCalculated[], number] => {
-      acc.push({ ...trip, trip: trip.odo - odo });
-      return [acc, trip.odo];
-    }, [[{ ...first, trip: 0 }], first.odo] as [TripCalculated[], number])[0];
-  }, [trips]);
+  // 分類は車両一覧の購読から取り出す（車両ドキュメントを別に読まない）
+  const vehicleClasses = useMemo(() => {
+    return vehicles.find(({ id }) => id === currentVehicleId)?.classes || [];
+  }, [vehicles, currentVehicleId]);
 
-  const classSummaries = useMemo(() => calculatedTrips.filter(({ timestamp }) => {
-    return timestamp.toDate().getFullYear() === currentYear;
-  }).reduce((acc, { class: c, trip }) => {
-    if (!(c in acc)) acc[c] = 0;
-    if (trip !== undefined) acc[c] += trip;
-    return acc;
-  }, {} as Record<string, number>), [calculatedTrips, currentYear]);
-
-  const sum = useMemo(() => {
-    const last = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
-    let first = [...calculatedTrips].reverse().find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear - 1);
-    if (!first) first = calculatedTrips.find(({ timestamp }) => timestamp.toDate().getFullYear() === currentYear);
-    if (!first || !last) return 0;
-    return last.odo - first.odo;
-  }, [calculatedTrips, currentYear]);
+  // 続きがあるときは、いちばん古い 1 件は「その次の記録の走行距離を出すための
+  // 土台」として読んでいるだけなので表示しない
+  const [visibleTrips, baseTrip] = useMemo<[TripIdentified[], TripIdentified | null]>(() => {
+    if (!tripsState.hasMore) return [tripsState.trips, null];
+    return [tripsState.trips.slice(0, -1), tripsState.trips[tripsState.trips.length - 1] || null];
+  }, [tripsState.trips, tripsState.hasMore]);
 
   // 一覧は新しい順に表示する（trip の差分計算は古い順のまま）
-  const displayTrips = useMemo(() => [...calculatedTrips].reverse(), [calculatedTrips]);
+  const displayTrips = useMemo(() => calculateTrips(visibleTrips, baseTrip).reverse(), [visibleTrips, baseTrip]);
 
-  // trips はスナップショット順で時系列とは限らないため、ODO（単調増加）の最大値を最新値とする
-  const lastODO = useMemo(() => trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [trips]);
+  // ODO は単調増加なので、読み込み済みの最大値が最新値
+  const lastODO = useMemo(() => tripsState.trips.reduce((max, { odo }) => (odo > max ? odo : max), 0), [tripsState.trips]);
+
+  const tripsError = tripsState.failure ? TRIPS_MESSAGE[tripsState.failure] : '';
+  const errorMessage = loadError || tripsError;
 
   // ユーザー情報と車両一覧が揃うまでは選択肢を確定できない
   const vehiclesLoading = !userLoaded || !vehiclesLoaded;
   // 車両が決まる前や切り替え直後は、記録が空でも「記録なし」とは判断しない
-  const tripsLoading = !userLoaded || (!!currentVehicleId && !tripsLoaded);
+  const tripsLoading = !userLoaded || (!!currentVehicleId && !tripsState.loaded);
 
   function classStyle(cls: string) {
     const i = vehicleClasses.indexOf(cls);
@@ -347,13 +297,17 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   }
 
   // 却下時は理由を返し、フォーム側でユーザーに提示できるようにする
-  function createTrip(trip: Trip): string | null {
-    const prevTrip = [...calculatedTrips].reverse().find(({ timestamp }) => trip.timestamp.seconds > timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds > timestamp.nanoseconds);
-    const nextTrip = calculatedTrips.find(({ timestamp }) => trip.timestamp.seconds < timestamp.seconds || trip.timestamp.seconds === timestamp.seconds && trip.timestamp.nanoseconds < timestamp.nanoseconds);
+  async function createTrip(trip: Trip): Promise<string | null> {
+    if (!currentVehicleId) return '車両が選択されていません';
+    // 読み込み済みは「新しいほうから連続した範囲」なので、次（より新しい）の記録は
+    // 必ずこの中にある。前（より古い）の記録は、範囲の外なら 1 件だけ問い合わせる
+    const nextTrip = [...displayTrips].reverse().find(({ timestamp }) => compareTimestamp(trip.timestamp, timestamp) < 0);
+    const prevTrip = await store.findPrevious(currentVehicleId, trip.timestamp);
     if (prevTrip && trip.odo <= prevTrip.odo) return `ODOは前の記録（${formatNumber(prevTrip.odo)} km）より大きい値を入力してください`;
     if (nextTrip && trip.odo >= nextTrip.odo) return `ODOは次の記録（${formatNumber(nextTrip.odo)} km）より小さい値を入力してください`;
-    if (!currentVehicleId) return '車両が選択されていません';
     addDoc(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), trip);
+    // 覚えている年間集計は、記録が増えれば合わなくなる。次に開いたときに取り直す
+    store.invalidateYears(currentVehicleId);
     setNewTripEnabled(false);
     return null;
   }
@@ -412,15 +366,18 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
         </label>
       </section>
 
-      {loadError && (
+      {errorMessage && (
         <p className="mt-3 text-sm text-red-600 text-center" role="alert">
-          {loadError}
+          {errorMessage}
           <button type="button" onClick={retryLoad} className="ml-2 underline font-medium">再試行</button>
         </p>
       )}
 
-      {/* 年間集計（確認頻度は低いので折りたたみ） */}
-      <details className="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+      {/* 年間集計（確認頻度は低いので折りたたみ。開いたときだけ読み込む） */}
+      <details
+        className="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden"
+        onToggle={(e) => setSummaryOpen(e.currentTarget.open)}
+      >
         <summary className="cursor-pointer select-none px-4 py-3 font-bold text-gray-700 flex items-center gap-2">
           <span className="text-lime-600">📊</span>
           {currentYear}年の集計
@@ -431,19 +388,26 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
             <span className="font-black text-lg tabular-nums">{currentYear}</span>
             <button className="w-9 h-9 rounded-full border border-gray-300 text-gray-600 active:bg-gray-200" onClick={() => setCurrentYear((y) => y + 1)}>›</button>
           </div>
-          {tripsLoading ? (
+          {!currentVehicleId ? (
+            <p className="text-center text-sm text-gray-400 py-2">車両が選択されていません</p>
+          ) : yearState.failed ? (
+            <p className="text-center text-sm text-red-600" role="alert">
+              集計を読み込めませんでした
+              <button type="button" onClick={() => currentVehicleId && store.loadYear(currentVehicleId, currentYear, true)} className="ml-2 underline font-medium">再試行</button>
+            </p>
+          ) : !yearState.loaded ? (
             <Loader className="text-lime-500 text-2xl py-2" />
-          ) : Object.keys(classSummaries).length ? (
+          ) : Object.keys(yearState.byClass).length ? (
             <dl className="space-y-2">
-              {Object.entries(classSummaries).map(([key, value]) => (
+              {Object.entries(yearState.byClass).map(([key, value]) => (
                 <div key={key} className="flex items-center gap-3">
                   <dt className={`${classStyle(key)} shrink-0 text-xs font-medium px-2 py-1 rounded-full`}>{key}</dt>
                   <dd className="grow text-right tabular-nums font-medium">{formatNumber(value)} km</dd>
-                  {sum ? <dd className="w-16 text-right text-sm text-gray-500 tabular-nums">{Math.round(value / sum * 1000) / 10} %</dd> : null}
+                  {yearState.total ? <dd className="w-16 text-right text-sm text-gray-500 tabular-nums">{Math.round(value / yearState.total * 1000) / 10} %</dd> : null}
                 </div>
               ))}
             </dl>
-          ) : loadError ? null : (
+          ) : (
             <p className="text-center text-sm text-gray-400 py-2">記録がありません</p>
           )}
         </div>
@@ -478,7 +442,22 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           <li className="py-10">
             <Loader className="text-lime-500 text-3xl" />
           </li>
-        ) : !displayTrips.length && !loadError ? (
+        ) : tripsState.hasMore ? (
+          // 見えたら読み足す。自動で読めない環境のために押せるようにもしておく
+          <li ref={loadMoreAnchor} className="py-6 text-center">
+            {tripsState.loadingMore ? (
+              <Loader className="text-lime-500 text-2xl" />
+            ) : (
+              <button
+                type="button"
+                onClick={() => currentVehicleId && store.loadMore(currentVehicleId)}
+                className="text-sm text-gray-500 underline"
+              >
+                古い記録をもっと見る
+              </button>
+            )}
+          </li>
+        ) : !displayTrips.length && !errorMessage ? (
           <li className="text-center text-gray-400 py-10">
             {currentVehicleId ? (
               <>まだ記録がありません。<br />下のボタンから追加できます。</>
