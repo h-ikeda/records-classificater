@@ -72,8 +72,12 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   // 移行処理の実行中フラグ。移行中に届くスナップショットは自分のローカル書き込みの
   // 反映であり、参照先の車両がまだサーバーに無いため状態へ反映してはいけない
   const migrating = useRef(false);
-  // 一覧の末尾。ここが見えたら続きを読み足す
-  const loadMoreAnchor = useRef<HTMLLIElement>(null);
+  // 一覧の末尾。ここが見えたら続きを読み足す。
+  //
+  // ref ではなく state で持つ。ref だと、目印が現れたこと自体は再描画にも
+  // effect の依存にも表れないため、見張りを張る effect が「目印がまだ無い」
+  // まま走って空振りしたあと、二度と走らないことがある（下の effect の注記）。
+  const [loadMoreAnchor, setLoadMoreAnchor] = useState<HTMLLIElement | null>(null);
 
   const { store, state } = useTripStore(`${currentUser.uid}:${reloadKey}`);
   const tripsState = (currentVehicleId && state.trips[currentVehicleId]) || EMPTY_TRIPS_STATE;
@@ -193,16 +197,33 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     store.loadYear(currentVehicleId, currentYear);
   }, [store, summaryOpen, currentVehicleId, currentYear, yearState]);
 
-  // 一覧の末尾が見えたら続きを読み足す
+  // 一覧の末尾が見えたら続きを読み足す。
+  //
+  // 目印そのものを依存に入れる。読み込み中は目印を描かないので、続きがあると
+  // 分かった時点（hasMore）と、目印が現れる時点（読み込み完了）は必ずしも
+  // 同じではない。ずれるのは、キャッシュ由来のスナップショットが先に届いた
+  // ときで、年間集計を開くと実際に起きる。集計の取得でその年の記録が
+  // ローカルキャッシュへ載るため、そのあとに張られた（あるいは張り直された）
+  // 購読は、サーバーと同期する前にキャッシュ由来のウィンドウを届ける。
+  //
+  //   1. キャッシュ由来のウィンドウ → hasMore は立つが loaded はまだ false
+  //      （＝一覧はローダーのままで、目印は描かれない）
+  //   2. サーバー同期のウィンドウ → loaded が true になり目印が現れる。ただし
+  //      中身は同じなので hasMore も件数も変わらない
+  //
+  // hasMore と件数だけを依存にしていると 2 で effect が走らず、見張りが誰にも
+  // 張られないまま「スクロールしても古い記録が増えない」状態になる。
+  //
+  // 件数も依存に残す。読み足したあとも目印が見えたままなら、張り直して初回の
+  // 判定をやり直さないと、続きを読む合図が二度と来ない。
   useEffect(() => {
-    const anchor = loadMoreAnchor.current;
-    if (!anchor || !currentVehicleId || !tripsState.hasMore) return;
+    if (!loadMoreAnchor || !currentVehicleId) return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some(({ isIntersecting }) => isIntersecting)) store.loadMore(currentVehicleId);
     });
-    observer.observe(anchor);
+    observer.observe(loadMoreAnchor);
     return () => observer.disconnect();
-  }, [store, currentVehicleId, tripsState.hasMore, tripsState.trips.length]);
+  }, [store, currentVehicleId, loadMoreAnchor, tripsState.trips.length]);
 
   // 分類は車両一覧の購読から取り出す（車両ドキュメントを別に読まない）
   const vehicleClasses = useMemo(() => {
@@ -444,7 +465,7 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
           </li>
         ) : tripsState.hasMore ? (
           // 見えたら読み足す。自動で読めない環境のために押せるようにもしておく
-          <li ref={loadMoreAnchor} className="py-6 text-center">
+          <li ref={setLoadMoreAnchor} className="py-6 text-center">
             {tripsState.loadingMore ? (
               <Loader className="text-lime-500 text-2xl" />
             ) : (
