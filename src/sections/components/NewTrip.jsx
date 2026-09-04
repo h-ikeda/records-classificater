@@ -13,6 +13,9 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
   // 既定値は現在時刻。必要に応じて入力欄で調整する。
   const [dateTimeLocal, setDateTimeLocal] = useState(() => toLocalInputValue(new Date()));
   const [error, setError] = useState('');
+  // 送信中は二重送信を防ぐ。onSubmit は前後の記録を問い合わせることがあり、
+  // 即座には返らない
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setNewClass((prev) => (classOptions.includes(prev) ? prev : classOptions[0]));
@@ -26,8 +29,9 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
     odoInput.current?.focus();
   }, []);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
+    if (submitting) return;
     const date = new Date(dateTimeLocal);
     if (isNaN(date.getTime())) {
       setError('記録日時が正しくありません');
@@ -46,12 +50,19 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
       return;
     }
     // onSubmit は却下時に理由（文字列）を返す。成功時は null。
-    const rejection = onSubmit({
-      timestamp: Timestamp.fromDate(date),
-      odo: newODO,
-      class: newClass,
-    });
-    if (rejection) setError(rejection);
+    setSubmitting(true);
+    try {
+      const rejection = await onSubmit({
+        timestamp: Timestamp.fromDate(date),
+        odo: newODO,
+        class: newClass,
+      });
+      if (rejection) setError(rejection);
+    } catch {
+      setError('記録できませんでした。通信状況を確認して、もう一度お試しください');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -122,9 +133,10 @@ export default function NewTrip({ minOdo = 0, classOptions = [], onSubmit, onCan
         </button>
         <button
           type="submit"
-          className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600"
+          disabled={submitting}
+          className="flex-1 bg-lime-500 text-white rounded-xl py-2.5 font-bold shadow active:bg-lime-600 disabled:opacity-60"
         >
-          記録する
+          {submitting ? '記録中…' : '記録する'}
         </button>
       </div>
     </form>

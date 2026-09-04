@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, deleteField } from "@firebase/firestore";
+import { Timestamp, addDoc, collection, deleteDoc, doc, getDoc, getDocs, query, where, setDoc, updateDoc, deleteField } from "@firebase/firestore";
 import { RulesTestEnvironment, assertFails, assertSucceeds, initializeTestEnvironment } from "@firebase/rules-unit-testing";
 
 // 合成スクリプトは素の CommonJS なので require で読む
@@ -416,6 +416,28 @@ describe.each(roots)('Firestore security rules (%s)', (_label, root) => {
       });
       test('a write only user cannot get a trip', async () => {
         await assertFails(getDocs(col(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid, 'trips')));
+      });
+      // 走行記録は追加しかできない。クライアント側の購読（src/trips/store.ts）は
+      // 「購読しているウィンドウから記録が消えたのは、新しい記録に押し出された
+      // ときだけで、削除ではない」という前提で、一度読み込んだ記録を
+      // ドキュメント ID で持ち続けている。ウィンドウの出入りと削除は listener
+      // からは同じ removed として届いて見分けが付かないため、この前提が崩れると
+      // 消えた記録が一覧に残る。前提をここで固定しておく。
+      test('nobody can update a trip', async () => {
+        await Promise.all([
+          assertFails(updateDoc(document(env.authenticatedContext(uid).firestore(), 'vehicles', vid, 'trips', tid), {
+            odo: 99.9,
+          })),
+          assertFails(updateDoc(document(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid, 'trips', tid), {
+            odo: 99.9,
+          })),
+        ]);
+      });
+      test('nobody can delete a trip', async () => {
+        await Promise.all([
+          assertFails(deleteDoc(document(env.authenticatedContext(uid).firestore(), 'vehicles', vid, 'trips', tid))),
+          assertFails(deleteDoc(document(env.authenticatedContext(writeOnlyUid).firestore(), 'vehicles', vid, 'trips', tid))),
+        ]);
       });
       // 権限判定は親の車両ドキュメントを get して行うため、車両がまだ無いと拒否される。
       // クライアントは車両の作成がサーバーで確定してから trips を購読しなければならない
