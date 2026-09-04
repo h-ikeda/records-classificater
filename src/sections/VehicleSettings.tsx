@@ -7,6 +7,11 @@ import { userConverter } from '../firestore/definitions/User';
 import { vehicleConverter } from '../firestore/definitions/Vehicle';
 import Loader from '../components/Loader';
 
+// 見張りが諦めたときの表示。遅れて届いたら取り下げるので、どの購読が出した
+// メッセージかを見分けられるよう定数にしておく
+const USER_STALLED_MESSAGE = '車両設定を読み込めませんでした。通信状況を確認してください';
+const VEHICLE_STALLED_MESSAGE = '車両情報を読み込めませんでした。通信状況を確認してください';
+
 export default function VehicleSettings({
   currentUser,
   onClose,
@@ -17,6 +22,8 @@ export default function VehicleSettings({
   // initializeApp 後に評価されるよう、Firestore はコンポーネント内で取得する
   const db = getFirestore();
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
+  // 車両 ID を読めていないうちに「車両が選択されていません」と言わないための旗
+  const [userLoaded, setUserLoaded] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [name, setName] = useState('');
   // 走行種別（business / private など）のマスタ。
@@ -27,14 +34,30 @@ export default function VehicleSettings({
   // フォームへ初期値を反映済みかどうか。編集中の外部更新で入力が失われるのを防ぐ
   const initialized = useRef(false);
 
-  // 現在選択中の車両 ID を取得する
-  useEffect(() => subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
+  // 現在選択中の車両 ID を取得する。
+  // includeMetadataChanges を付けないと、キャッシュ由来から同期済みへ変わった
+  // だけのイベントが届かない（公式「Listen to offline data」）
+  useEffect(() => subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), { includeMetadataChanges: true }, (snapshot) => {
+    // 空のキャッシュからも「無い」という形で届く。車両が選ばれていないと
+    // 判断してよいのは、サーバーと同期できたときだけ
+    if (snapshot.metadata.fromCache) return;
     notify();
+    setUserLoaded(true);
     setCurrentVehicleId(snapshot.data()?.state.vehicle ?? null);
   }, () => {
     notify();
+    setUserLoaded(true);
     setCurrentVehicleId(null);
-  }), { label: 'ユーザー情報（車両設定）' }), [currentUser]);
+    setError('車両情報の読み込みに失敗しました');
+  }), {
+    label: 'ユーザー情報（車両設定）',
+    onStalled: () => {
+      setUserLoaded(true);
+      setError(USER_STALLED_MESSAGE);
+    },
+    // 諦めたあとに遅れて届いたら、出したままの表示を取り下げる
+    onRecovered: () => setError((prev) => (prev === USER_STALLED_MESSAGE ? '' : prev)),
+  }), [currentUser]);
 
   // 対象車両の現在値を読み込み、フォームの初期値とする
   useEffect(() => {
@@ -50,7 +73,12 @@ export default function VehicleSettings({
     // 届かなければ購読を張り直す（ローダーが回り続けるのを防ぐ）
     return subscribeWithWatchdog((notify) => onSnapshot(
       channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter),
+      { includeMetadataChanges: true },
       (snapshot) => {
+        // フォームの初期値はサーバーと同期できた内容だけを使う。キャッシュ由来は
+        // 「古いか、欠けているかもしれない」（公式）ので、それを初期値にすると
+        // 古い内容をそのまま保存して上書きしてしまう
+        if (snapshot.metadata.fromCache) return;
         notify();
         // 初回のみフォームへ反映する。共有操作などで snapshot が再発火しても
         // 編集中の入力を上書きしないようにする
@@ -81,9 +109,10 @@ export default function VehicleSettings({
       onStalled: () => {
         setName('');
         setClasses([]);
-        setError('車両情報を読み込めませんでした。通信状況を確認してください');
+        setError(VEHICLE_STALLED_MESSAGE);
         setLoaded(true);
       },
+      onRecovered: () => setError((prev) => (prev === VEHICLE_STALLED_MESSAGE ? '' : prev)),
     });
   }, [currentVehicleId]);
 
@@ -157,8 +186,12 @@ export default function VehicleSettings({
       >
         <h3 className="text-base font-bold text-center py-1">車両設定</h3>
 
-        {!currentVehicleId ? (
-          <p className="text-center text-sm text-gray-500 py-8">車両が選択されていません</p>
+        {!userLoaded ? (
+          <Loader className="text-lime-500 text-3xl py-8" />
+        ) : !currentVehicleId ? (
+          <p className="text-center text-sm py-8" role={error ? 'alert' : undefined}>
+            <span className={error ? 'text-red-600' : 'text-gray-500'}>{error || '車両が選択されていません'}</span>
+          </p>
         ) : !loaded ? (
           <Loader className="text-lime-500 text-3xl py-8" />
         ) : (

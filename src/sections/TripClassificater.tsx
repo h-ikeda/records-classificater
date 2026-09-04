@@ -32,6 +32,15 @@ const classPalette = [
   'bg-cyan-100 text-cyan-800',
 ];
 
+// 見張りが諦めたときの表示。遅れて届いたら取り下げるので、どの購読が出した
+// メッセージかを見分けられるよう定数にしておく
+const STALLED_MESSAGE = {
+  user: 'データを読み込めませんでした。通信状況を確認して再試行してください',
+  vehicles: '車両一覧を読み込めませんでした。通信状況を確認して再試行してください',
+  vehicle: '車両情報を読み込めませんでした。通信状況を確認して再試行してください',
+  trips: '走行記録を読み込めませんでした。通信状況を確認して再試行してください',
+};
+
 function sortByTimestamp({ timestamp: t1 }: Trip, { timestamp: t2 }: Trip) {
   return (t1 as unknown as number) - (t2 as unknown as number);
 }
@@ -81,14 +90,26 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     migrating.current = false;
     // スナップショットのコールバックでは状態を更新するだけにし、書き込みや
     // 入力待ちは持ち込まない（登録は createFirstVehicle が受け持つ）
-    const unsubUser = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), (snapshot) => {
-      notify();
-      // 変換の失敗や下の早期 return で読み込み中のまま止まらないよう、
-      // 完了はスナップショットを見る前に記録する
-      setUserLoaded(true);
+    // includeMetadataChanges を付けないと、キャッシュ由来のスナップショットが
+    // サーバー同期済みへ変わっただけのイベントが届かない（公式「Listen to offline
+    // data」）。fromCache を判断に使う以上、必ず付ける
+    const unsubUser = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'users', currentUser.uid).withConverter(userConverter), { includeMetadataChanges: true }, (snapshot) => {
+      // キャッシュ由来の内容は「古いか、欠けているかもしれない」（公式）。空の
+      // キャッシュでも同じ形で届くため、読み込み完了と見なしてよいのは
+      // サーバーと同期できたときだけ
+      const fromServer = !snapshot.metadata.fromCache;
+      if (fromServer) {
+        notify();
+        // 変換の失敗や下の早期 return で読み込み中のまま止まらないよう、
+        // 完了はスナップショットを見る前に記録する
+        setUserLoaded(true);
+      }
       if (!snapshot.exists()) {
-        // まだ車両が 1 台も無い。登録は createFirstVehicle（フォームの送信）で行う
-        setNeedsSetup(true);
+        // キャッシュに無いだけかもしれないので、「まだ車両が 1 台も無い」と
+        // 判断するのはサーバーと同期できたときだけ。さもないと、読み込めて
+        // いないだけの利用者に車両の登録画面を出してしまう。
+        // 登録は createFirstVehicle（フォームの送信）で行う
+        if (fromServer) setNeedsSetup(true);
         return;
       }
       // 登録中に届くのは自分のローカル書き込みの反映で、車両はまだサーバーに無い。
@@ -104,17 +125,24 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     }), {
       label: 'ユーザー情報',
       onStalled: () => {
-        setLoadError('データを読み込めませんでした。通信状況を確認して再試行してください');
+        setLoadError(STALLED_MESSAGE.user);
         setUserLoaded(true);
       },
+      // 諦めたあとに遅れて届いたら、出したままの表示を取り下げる
+      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.user ? '' : prev)),
     });
     const unsubVehicles = subscribeWithWatchdog((notify) => {
       // 張り直すと全件が added として届く。前回分は捨ててから購読する
       setVehicles([]);
-      return onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), (snapshot) => {
-        notify();
-        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
-        setVehiclesLoaded(true);
+      return onSnapshot(query(channelCollection(db, 'vehicles'), where('permissions.read', 'array-contains', currentUser.uid)).withConverter(vehicleConverter), { includeMetadataChanges: true }, (snapshot) => {
+        // 空のキャッシュから届く空のスナップショットを完了と見なすと、読めて
+        // いないのに「車両がありません」と表示してしまう。完了はサーバーと
+        // 同期できたときだけ。反映自体は毎回行い、自分の書き込みは即座に映す
+        if (!snapshot.metadata.fromCache) {
+          notify();
+          // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+          setVehiclesLoaded(true);
+        }
         snapshot.docChanges().forEach(({ doc, type }) => {
           setVehicles((prev) => {
             if (type === 'added') {
@@ -138,9 +166,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     }, {
       label: '車両一覧',
       onStalled: () => {
-        setLoadError('車両一覧を読み込めませんでした。通信状況を確認して再試行してください');
+        setLoadError(STALLED_MESSAGE.vehicles);
         setVehiclesLoaded(true);
       },
+      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.vehicles ? '' : prev)),
     });
     return () => {
       unsubUser();
@@ -154,20 +183,33 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     setVehicleClasses([]);
     setTripsLoaded(false);
     if (!currentVehicleId) return;
-    const unsubVehicle = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), (snapshot) => {
+    const unsubVehicle = subscribeWithWatchdog((notify) => onSnapshot(channelDoc(db, 'vehicles', currentVehicleId).withConverter(vehicleConverter), { includeMetadataChanges: true }, (snapshot) => {
+      // キャッシュ由来の空スナップショットで分類を消すと、色分けと入力フォームの
+      // 選択肢が黙って壊れる。サーバーと同期できた内容だけを反映する
+      if (snapshot.metadata.fromCache) return;
       notify();
       setVehicleClasses(snapshot.data()?.classes || []);
     }, () => {
       notify();
       setVehicleClasses([]);
-    }), { label: '車両情報' });
+    }), {
+      label: '車両情報',
+      // 分類が読めないと色分けと入力フォームの選択肢が壊れる。黙って諦めない
+      onStalled: () => setLoadError(STALLED_MESSAGE.vehicle),
+      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.vehicle ? '' : prev)),
+    });
     const unsubTrips = subscribeWithWatchdog((notify) => {
       // 張り直すと全件が added として届く。前回分は捨ててから購読する
       setTrips([]);
-      return onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), (snapshot) => {
-        notify();
-        // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
-        setTripsLoaded(true);
+      return onSnapshot(channelCollection(db, 'vehicles', currentVehicleId, 'trips').withConverter(tripConverter), { includeMetadataChanges: true }, (snapshot) => {
+        // 空のキャッシュから届く空のスナップショットを完了と見なすと、1 件も
+        // 読めていないのに「記録がありません」と表示してしまう。完了はサーバーと
+        // 同期できたときだけ。反映自体は毎回行い、自分の書き込みは即座に映す
+        if (!snapshot.metadata.fromCache) {
+          notify();
+          // 1 件の変換に失敗しても読み込み中のまま止まらないよう、完了を先に記録する
+          setTripsLoaded(true);
+        }
         snapshot.docChanges().forEach(({ type, doc }) => {
           setTrips((prev) => {
             if (type === 'added') {
@@ -191,9 +233,10 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
     }, {
       label: '走行記録',
       onStalled: () => {
-        setLoadError('走行記録を読み込めませんでした。通信状況を確認して再試行してください');
+        setLoadError(STALLED_MESSAGE.trips);
         setTripsLoaded(true);
       },
+      onRecovered: () => setLoadError((prev) => (prev === STALLED_MESSAGE.trips ? '' : prev)),
     });
     return () => {
       unsubVehicle();
