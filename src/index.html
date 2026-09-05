@@ -4,6 +4,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Records classificater</title>
 <link rel="stylesheet" href="index.css">
+<style>
+  /* 起動オーバーレイは JS バンドルより先に出したいので、Tailwind ではなく
+     ここに直接書く。読み込みが終わると DOM ごと消えるため使い回しはしない */
+  .boot {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    background: #f1f5f9;
+    color: #3f6212;
+    font: 500 0.875rem/1.4 system-ui, sans-serif;
+    transition: opacity 0.35s ease;
+  }
+
+  .boot.is-done {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .boot__mark {
+    width: 3rem;
+    height: 3rem;
+    border: 0.3rem solid #e2e8f0;
+    border-top-color: #84cc16;
+    border-radius: 9999px;
+    animation: boot-spin 0.9s linear infinite;
+  }
+
+  .boot__bar {
+    width: min(16rem, 60vw);
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: #e2e8f0;
+    overflow: hidden;
+  }
+
+  .boot__fill {
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #65a30d, #a3e635, #65a30d);
+    background-size: 200% 100%;
+    animation: boot-flow 1.2s linear infinite;
+  }
+
+  .boot__text {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  @keyframes boot-spin {
+    to { transform: rotate(1turn); }
+  }
+
+  @keyframes boot-flow {
+    to { background-position: -200% 0; }
+  }
+
+  /* 動きが苦手な環境では回転と流れを止め、進捗の伸びだけで状態を伝える */
+  @media (prefers-reduced-motion: reduce) {
+    .boot__mark { animation-duration: 3s; }
+    .boot__fill { animation: none; }
+  }
+</style>
 <script src="index.tsx" type="module"></script>
 <body class="container px-4 mx-auto">
+<div id="boot" class="boot">
+  <div class="boot__mark" aria-hidden="true"></div>
+  <div
+    id="boot-bar"
+    class="boot__bar"
+    role="progressbar"
+    aria-label="読み込みの進捗"
+    aria-valuemin="0"
+    aria-valuemax="100"
+    aria-valuenow="0"
+    aria-valuetext="読み込み中 0%"
+  >
+    <div id="boot-fill" class="boot__fill"></div>
+  </div>
+  <p id="boot-text" class="boot__text" aria-hidden="true">読み込み中 0%</p>
+</div>
 <div id="root"></div>
+<script>
+  (function () {
+    var overlay = document.getElementById('boot');
+    var bar = document.getElementById('boot-bar');
+    var fill = document.getElementById('boot-fill');
+    var text = document.getElementById('boot-text');
+    if (!overlay || !bar || !fill || !text) return;
+
+    // 実際に測れるのは「どの段階まで来たか」だけなので、段階ごとに到達点を決め、
+    // そこへ滑らかに近づける。近づくほど遅くなるので、次の段階が遅れても
+    // 止まったようには見えず、飛び越して 100% になることもない。
+    var STEPS = { script: 35, firebase: 60, render: 80 };
+    var target = 8;
+    var shown = 0;
+    var finished = false;
+    var lastRendered = -1;
+
+    function render() {
+      var value = Math.min(Math.round(shown), 100);
+      fill.style.width = value + '%';
+      if (value === lastRendered) return;
+      lastRendered = value;
+      bar.setAttribute('aria-valuenow', String(value));
+      bar.setAttribute('aria-valuetext', '読み込み中 ' + value + '%');
+      text.textContent = '読み込み中 ' + value + '%';
+    }
+
+    function hide() {
+      shown = 100;
+      render();
+      overlay.className = 'boot is-done';
+      window.setTimeout(function () {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 400);
+    }
+
+    function tick() {
+      shown += (target - shown) * (finished ? 0.25 : 0.08);
+      render();
+      if (finished && shown > 99.5) {
+        hide();
+        return;
+      }
+      window.requestAnimationFrame(tick);
+    }
+
+    window.bootProgress = {
+      advance: function (step) {
+        var next = STEPS[step];
+        if (typeof next === 'number' && next > target) target = next;
+      },
+      done: function () {
+        finished = true;
+        target = 100;
+      },
+    };
+
+    // バンドルの読み込み自体に失敗して advance が一度も呼ばれなくても、
+    // 全リソースが揃った時点までは進めておく。
+    window.addEventListener('load', function () {
+      window.bootProgress.advance('script');
+    });
+
+    window.requestAnimationFrame(tick);
+  }());
+</script>

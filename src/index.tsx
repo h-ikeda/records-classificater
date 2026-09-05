@@ -4,6 +4,9 @@ import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { createRoot } from 'react-dom/client';
 import config from './firebase';
 import App from './App';
+import { advance } from './bootProgress';
+
+advance('script');
 
 initializeApp(config);
 
@@ -12,5 +15,9 @@ if (process.env.NODE_ENV !== 'production') {
   connectFirestoreEmulator(getFirestore(), 'localhost', 8080);
 }
 
+advance('firebase');
+
 const container = document.getElementById('root')!;
 createRoot(container).render(<App />);
+
+advance('render');
