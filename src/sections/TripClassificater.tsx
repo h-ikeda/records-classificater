@@ -54,8 +54,14 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
   const db = getFirestore();
   const [currentVehicleId, setCurrentVehicleId] = useState<string | null>(null);
   const [currentYear, setCurrentYear] = useState(() => (new Date()).getFullYear());
-  // 年間集計は畳んである間は 1 件も読まない。開かれたときだけ取りに行く
-  const [summaryOpen, setSummaryOpen] = useState(false);
+  // 年間集計は畳んである間は 1 件も読まない。開かれたときだけ取りに行く。
+  //
+  // 「開いているか」ではなく「どの車両で開いたか」を覚える。表示は選択中の車両と
+  // 突き合わせて決めるので、車両を切り替えたその場で畳まれる。開いたままだと、
+  // 切り替えた瞬間に新しい車両の 1 年分を読みに行ってしまう（初期表示のぶんだけを
+  // 読む、という約束が崩れる）。開き直せばそのときに読む
+  const [summary, setSummary] = useState<{ open: boolean, vehicleId: string | null }>({ open: false, vehicleId: null });
+  const summaryOpen = summary.open && summary.vehicleId === currentVehicleId;
   const [vehicles, setVehicles] = useState<VehicleIdentified[]>([]);
   const [newTripEnabled, setNewTripEnabled] = useState(false);
   // 取得前の空データを「記録なし」と誤表示しないよう、読み込み完了を明示的に管理する
@@ -376,8 +382,9 @@ export default function TripClassificater({ currentUser }: { currentUser: User }
 
       {/* 年間集計（確認頻度は低いので折りたたみ。開いたときだけ読み込む） */}
       <details
+        open={summaryOpen}
         className="my-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden"
-        onToggle={(e) => setSummaryOpen(e.currentTarget.open)}
+        onToggle={(e) => setSummary({ open: e.currentTarget.open, vehicleId: currentVehicleId })}
       >
         <summary className="cursor-pointer select-none px-4 py-3 font-bold text-gray-700 flex items-center gap-2">
           <span className="text-lime-600">📊</span>
