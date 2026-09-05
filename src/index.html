@@ -15,7 +15,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1.25rem;
+    gap: 0.75rem;
     background: #f1f5f9;
     color: #3f6212;
     font: 500 0.875rem/1.4 system-ui, sans-serif;
@@ -25,15 +25,6 @@
   .boot.is-done {
     opacity: 0;
     pointer-events: none;
-  }
-
-  .boot__mark {
-    width: 3rem;
-    height: 3rem;
-    border: 0.3rem solid #e2e8f0;
-    border-top-color: #84cc16;
-    border-radius: 9999px;
-    animation: boot-spin 0.9s linear infinite;
   }
 
   .boot__bar {
@@ -58,24 +49,18 @@
     font-variant-numeric: tabular-nums;
   }
 
-  @keyframes boot-spin {
-    to { transform: rotate(1turn); }
-  }
-
   @keyframes boot-flow {
     to { background-position: -200% 0; }
   }
 
-  /* 動きが苦手な環境では回転と流れを止め、進捗の伸びだけで状態を伝える */
+  /* 動きが苦手な環境では流れる装飾を止め、進捗の伸びだけで状態を伝える */
   @media (prefers-reduced-motion: reduce) {
-    .boot__mark { animation-duration: 3s; }
     .boot__fill { animation: none; }
   }
 </style>
 <script src="index.tsx" type="module"></script>
 <body class="container px-4 mx-auto">
 <div id="boot" class="boot">
-  <div class="boot__mark" aria-hidden="true"></div>
   <div
     id="boot-bar"
     class="boot__bar"
