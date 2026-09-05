@@ -7,6 +7,7 @@ import TripClassificater from './sections/TripClassificater';
 import VehicleSettings from './sections/VehicleSettings';
 import Loader from './components/Loader';
 import { previewChannel } from './firestore/channel';
+import { done } from './bootProgress';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null | undefined>(undefined);
@@ -16,6 +17,11 @@ export default function App() {
   useEffect(() => onAuthStateChanged(auth, (user) => {
     setCurrentUser(user);
   }), [auth]);
+
+  // 認証状態が決まれば描くものが決まるので、起動オーバーレイはここで畳む
+  useEffect(() => {
+    if (currentUser !== undefined) done();
+  }, [currentUser]);
 
   // ログアウト時に車両設定モーダルを閉じ、再ログイン時の意図しない再表示を防ぐ
   useEffect(() => {
