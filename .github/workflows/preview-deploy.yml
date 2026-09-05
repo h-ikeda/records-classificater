@@ -21,9 +21,10 @@ name: Preview deploy
 # ため、そこに書かれた番号をそのまま信じると、別の PR のチャンネルへ出させる
 # ことができてしまう。
 #
-# 注意: workflow_run の実行は PR のチェック一覧には出ない。結果は PR コメントに
-# 出す。また、このワークフローは **既定ブランチに存在して初めて動く** ため、
-# これを追加する PR 自身のプレビューはマージされるまで更新されない。
+# 注意: workflow_run の実行は PR のチェック一覧には出ない。結果は成否にかかわらず
+# PR コメントに出す（ここで書かなければ、PR 側には何も残らないため）。また、この
+# ワークフローは **既定ブランチに存在して初めて動く** ため、これを追加する PR 自身の
+# プレビューはマージされるまで更新されない。
 
 on:
   workflow_run:
@@ -216,45 +217,100 @@ jobs:
           fi
           echo "承認済みドメインに $host を追加しました"
       - name: Check that the preview URL is reachable
+        id: reachable
         # デプロイの成否だけでなく、URL が実際に開けることを毎回確かめる。
         # ここを省くと、URL を貼られた人が最初の失敗を踏むことになる。
+        #
+        # ただし **ここではジョブを止めない**。workflow_run の実行は PR のチェック
+        # 一覧に出ないため、コメントより手前で終わると PR 側には成功も失敗も何も
+        # 残らず、「プレビューが出ない理由がどこにも無い」状態になる。結果は出力に
+        # 置き、コメントへ書いたうえで最後のステップで落とす。
+        #
+        # 待ち時間は伸ばしながら合わせて 3 分ほど見る。作りたてのチャンネルは
+        # 配信に載るまで待たされることがあり、実際に 50 秒では足りずに 404 の
+        # まま終わった（#465）。
         env:
           URL: '${{ steps.deploy.outputs.url }}'
         run: |
-          for attempt in 1 2 3 4 5; do
+          code=000
+          for wait in 0 5 10 15 20 30 30 30 30 30; do
+            [ "$wait" -eq 0 ] || sleep "$wait"
             code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)"
             if [ "$code" = "200" ]; then
               echo "疎通確認 OK: $URL"
+              echo "ok=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "試行 $attempt: HTTP $code（チャンネルの反映待ちの可能性あり）"
-            sleep 10
+            echo "HTTP $code（チャンネルの反映待ちの可能性あり）"
           done
-          echo "::error::プレビュー URL が開けません（最後の応答: HTTP $code）。$URL"
-          exit 1
-      - name: Comment preview URL on PR
+          echo "::warning::プレビュー URL がまだ開けません（最後の応答: HTTP $code）。$URL"
+          {
+            echo "ok=false"
+            echo "code=$code"
+          } >> "$GITHUB_OUTPUT"
+      - name: Comment the result on PR
+        # workflow_run の実行は PR のチェック一覧に出ないので、PR 側への連絡先は
+        # このコメントだけ。途中で落ちていても必ず書きに行き、出せなかったことも
+        # 含めて PR に残す。
+        if: ${{ !cancelled() && steps.pr.outputs.number != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+          URL: ${{ steps.deploy.outputs.url }}
+          REACHABLE: ${{ steps.reachable.outputs.ok }}
+          LAST_CODE: ${{ steps.reachable.outputs.code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const marker = '<!-- firebase-hosting-preview -->';
-            const body = [
-              marker,
-              '🔍 **プレビューデプロイ**: ${{ steps.deploy.outputs.url }}',
-              '',
-              '- コミット: ${{ steps.pr.outputs.sha }}',
-              '- チャンネル: `pr-${{ env.PR }}`（最終デプロイから 7 日で失効、push ごとに更新）',
-              '- データ: Firestore `preview-channels/pr-${{ env.PR }}/…`（本番と分離。空の状態から始まります）',
-              '- ルール: 本番の区間は `main`、プレビューの区間はチャンネルごとに各 PR のものを使って合成しています。',
-              '- ログインは **本番と同じ Google アカウント** です（同じ Firebase プロジェクトのため）。',
-              '',
-              'この URL での操作は `preview-channels/pr-${{ env.PR }}` 配下にのみ書き込まれ、本番のデータには影響しません。PR クローズ時にまとめて削除されます。',
-              '',
-              '> このデプロイは `main` のコンテキスト（`workflow_run`）で走るため、PR のチェック一覧には出ません。ビルドの成否は Preview build を見てください。',
-            ].join('\n');
+            const pr = Number(process.env.PR_NUMBER);
+            const { URL: url, HEAD_SHA: sha, RUN_URL: runUrl } = process.env;
+            const note =
+              '> このデプロイは `main` のコンテキスト（`workflow_run`）で走るため、PR のチェック一覧には出ません。ビルドの成否は Preview build を見てください。';
+            const lines = [marker];
+            if (!url) {
+              lines.push(
+                '⚠️ **プレビューを出せませんでした**',
+                '',
+                `- コミット: ${sha}`,
+                `- 失敗した実行: ${runUrl}`,
+                '',
+                '原因は上の実行ログにあります。直したものを push すればやり直されます。',
+                '',
+                note,
+              );
+            } else {
+              lines.push(
+                `🔍 **プレビューデプロイ**: ${url}`,
+                '',
+                `- コミット: ${sha}`,
+                `- チャンネル: \`pr-${pr}\`（最終デプロイから 7 日で失効、push ごとに更新）`,
+                `- データ: Firestore \`preview-channels/pr-${pr}/…\`（本番と分離。空の状態から始まります）`,
+                '- ルール: 本番の区間は `main`、プレビューの区間はチャンネルごとに各 PR のものを使って合成しています。',
+                '- ログインは **本番と同じ Google アカウント** です（同じ Firebase プロジェクトのため）。',
+                '',
+                `この URL での操作は \`preview-channels/pr-${pr}\` 配下にのみ書き込まれ、本番のデータには影響しません。PR クローズ時にまとめて削除されます。`,
+              );
+              const reachable = process.env.REACHABLE;
+              if (reachable === 'false') {
+                lines.push(
+                  '',
+                  `⚠️ デプロイ後の疎通確認では、この URL はまだ開けていません（最後の応答: HTTP ${process.env.LAST_CODE || '不明'}）。チャンネルが配信に載るのを待っているだけなら、しばらく置いてから開くと表示されます。開けないままなら [実行ログ](${runUrl}) を見てください。`,
+                );
+              } else if (reachable !== 'true') {
+                lines.push(
+                  '',
+                  `⚠️ デプロイの後の工程が失敗したため、この URL が開けることは確かめられていません。[実行ログ](${runUrl}) を見てください。`,
+                );
+              }
+              lines.push('', note);
+            }
+            const body = lines.join('\n');
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: Number(process.env.PR),
+              issue_number: pr,
             });
             const existing = comments.find(
               (c) => c.user.type === 'Bot' && c.body.includes(marker)
@@ -270,7 +326,17 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: Number(process.env.PR),
+                issue_number: pr,
                 body,
               });
             }
+      - name: Fail when the preview URL is not reachable
+        # 落とすのはコメントを書いたあと。ジョブが赤いままなので Actions 側でも
+        # 気付けるし、PR 側にも「まだ開けない」ことが残っている。
+        if: ${{ !cancelled() && steps.reachable.outcome == 'success' && steps.reachable.outputs.ok != 'true' }}
+        env:
+          URL: '${{ steps.deploy.outputs.url }}'
+          LAST_CODE: '${{ steps.reachable.outputs.code }}'
+        run: |
+          echo "::error::プレビュー URL が開けません（最後の応答: HTTP $LAST_CODE）。$URL"
+          exit 1
